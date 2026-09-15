@@ -1,0 +1,46 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  check-and-smoke:
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        node-version: ['20.x', '22.x']
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node.js ${{ matrix.node-version }}
+        uses: actions/setup-node@v4
+        with:
+          node-version: ${{ matrix.node-version }}
+
+      - name: Syntax check (zero-dependency, Node built-ins only)
+        run: |
+          fail=0
+          for f in server.js tools/*.js; do
+            node --check "$f" || { echo "SYNTAX FAIL: $f"; fail=1; }
+          done
+          exit $fail
+
+      - name: Smoke test (boot server, hit health endpoint)
+        run: |
+          PORT=18099 node server.js > /tmp/mock-server.log 2>&1 &
+          SRV=$!
+          ok=0
+          for i in $(seq 1 60); do
+            if curl -fsS http://127.0.0.1:18099/_admin/health -o /dev/null 2>/dev/null; then ok=1; break; fi
+            sleep 0.5
+          done
+          echo "--- health ---"
+          curl -fsS http://127.0.0.1:18099/_admin/health || true
+          echo "--- root (HTTP status) ---"
+          curl -s -o /dev/null -w "%{http_code}\n" http://127.0.0.1:18099/ || true
+          kill $SRV 2>/dev/null
+          if [ "$ok" -ne 1 ]; then echo "SMOKE FAIL: server did not become healthy"; cat /tmp/mock-server.log; exit 1; fi

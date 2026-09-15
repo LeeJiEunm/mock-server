@@ -1,5 +1,7 @@
 # Mock Server · Dynamic Mock Service with a Web Console
 
+> Language: [English](README.en.md) ｜ [中文](README.md)
+
 One configuration can host interfaces for multiple upstream services; **a single interface can return different responses based on the request content**. That is the core difference from "one endpoint = one hard-coded response" mock platforms: here "one interface = a list of conditional rules, return whichever rule matches".
 
 Zero dependencies (Node built-in modules only), single process, change rules without restarting.
