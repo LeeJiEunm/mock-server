@@ -1,0 +1,42 @@
+{
+  "name": "mock-server",
+  "version": "1.0.0",
+  "description": "带界面的动态挡板服务：同一个接口按请求内容返回不同结果，零依赖单进程，改规则不用重启",
+  "keywords": [
+    "mock",
+    "mock-server",
+    "stub",
+    "api-mock",
+    "挡板",
+    "联调"
+  ],
+  "homepage": "https://github.com/LeeJiEunm/mock-server#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/LeeJiEunm/mock-server.git"
+  },
+  "bugs": {
+    "url": "https://github.com/LeeJiEunm/mock-server/issues"
+  },
+  "author": "LeeJiEunm",
+  "engines": {
+    "node": ">=16"
+  },
+  "scripts": {
+    "start": "node server.js",
+    "verify:deploy": "bash tools/verify-deploy.sh"
+  },
+  "files": [
+    "server.js",
+    "public",
+    "tools",
+    "docs",
+    "config.json",
+    "Dockerfile",
+    "docker-compose.yml",
+    "mock-server.service",
+    "deploy.sh",
+    "README.md",
+    "README.en.md"
+  ]
+}

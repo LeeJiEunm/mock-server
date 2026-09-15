@@ -1,0 +1,398 @@
+<!DOCTYPE html>
+<html lang="zh-CN" data-page-node-id="CYVeKsCwnOikrGCEuFj8oh">
+<head data-page-node-id="WBJ5a0O9MGyExGoVdHggUw">
+  <meta charset="UTF-8" data-page-node-id="YfPHj5ZtnaFpGEMOFMuAw3">
+  <meta name="viewport" content="width=device-width, initial-scale=1" data-page-node-id="N9QfViQUskE5u2wqALfjGX">
+  <meta name="color-scheme" content="dark light" data-page-node-id="o9OFghoYpuklnZMeqVO3FF">
+  <title data-i18n="app.title">Mock Server · 动态挡板控制台</title>
+  <!-- 内联 SVG 图标：不额外发请求，也不依赖任何 CDN -->
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='7' fill='%23100f0e'/%3E%3Cpath d='M9 22V10l7 7 7-7v12' fill='none' stroke='%23ff6b2c' stroke-width='2.6' stroke-linecap='round' stroke-linejoin='round'/%3E%3C/svg%3E">
+  <!-- 一律使用相对路径：这样从服务根、从子目录、或用面板直接预览 index.html 都能加载到样式 -->
+  <link rel="stylesheet" href="styles/tokens.css" data-page-node-id="8GUWBPRjiGmeUCkkTCQ7cV">
+  <link rel="stylesheet" href="styles/base.css" data-page-node-id="Xa5yjGQcHI96rvZaSXys2B">
+  <link rel="stylesheet" href="styles/components.css" data-page-node-id="ecwYyREmV4Le3J2tbtbVn6">
+</head>
+<body class="atmosphere grain" data-page-node-id="Ej9Owy39fc80Dzp9vRBQwF">
+
+  <!-- 极光流动层：纯 CSS transform 动画（GPU 合成），不占用主线程重绘。见 base.css -->
+  <div class="aurora-bg" aria-hidden="true"></div>
+
+  <!-- ======================= 顶栏 ======================= -->
+  <header class="topbar reveal" data-page-node-id="4HWAofvEskPxw72x3dYujw">
+    <div class="brand" data-page-node-id="vkoEudP3KOPlo5HaftFfsQ">
+      <span class="brand__logo" aria-hidden="true">M</span>
+      <div class="brand__txt">
+        <h1 class="brand__mark" data-page-node-id="iFAIyZo66eplUI2wNfqlYq">mock<em data-page-node-id="uADypG0Y1QCpmtFjumhxkt">·</em>server</h1>
+        <span class="brand__sub" data-page-node-id="nlmTAZ6ACyd2kChQRkxbUI" data-i18n="brand.sub">动态挡板控制台</span>
+      </div>
+    </div>
+    <span class="topbar__sep topbar__sep--brand" aria-hidden="true"></span>
+
+    <div class="topbar__stats" data-page-node-id="JztqpBVT9PpQP0l9AyHw44">
+      <div class="stat" data-page-node-id="Gpaxn30GgZqBWeJJODG1lj">
+        <span class="stat__label" data-page-node-id="laPRnjHk36qrJrb49Qi5ky" data-i18n="stat.apis">接口</span>
+        <span class="stat__value" id="statApis" data-page-node-id="sPwsSoAurATd1uCFPIOO4W">—</span>
+      </div>
+      <div class="stat" data-page-node-id="sFa0cIwVSYDqYYl5hA5sHu">
+        <span class="stat__label" data-page-node-id="puoqpJO2MAaM8RnJQHr6ue" data-i18n="stat.rules">规则</span>
+        <span class="stat__value" id="statRules" data-page-node-id="MakPRGAFfV5rRoubNjoMgF">—</span>
+      </div>
+      <div class="stat" data-page-node-id="U7hHdJyDkrlCwuORUwj78D">
+        <span class="stat__label" data-page-node-id="HIcHnuj0r0MiVhYkABZaPZ" data-i18n="stat.uptime">运行时长</span>
+        <span class="stat__value" id="statUptime" data-page-node-id="UKsuvYRGNcaQZFEeoujGaV">—</span>
+      </div>
+      <span class="topbar__status" id="health" title="与服务端的连通状态" data-page-node-id="DxXuwt0XRndASFvgUDERlS">
+        <span class="topbar__status__dot" data-page-node-id="k9VScGywIeqQQDFdv2Ro1l"></span>
+        <span id="healthText" data-page-node-id="IBTtAGbZbpTMohNBOjH8ct" data-i18n="health.connecting">连接中</span>
+      </span>
+    </div>
+
+    <div class="topbar__actions" data-page-node-id="oAY3gRBIgIMsE0KJPHQmFC">
+      <div class="topbar__icons">
+      <button class="btn btn--icon topbar__icon" id="btnShare" type="button" data-edit-only data-i18n-title="share.title" data-i18n-aria="share.title" aria-label="Share">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="18" cy="5" r="3"></circle><circle cx="6" cy="12" r="3"></circle><circle cx="18" cy="19" r="3"></circle><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"></path></svg>
+      </button>
+      <button class="btn btn--icon topbar__icon" id="btnHelp" type="button" data-i18n-title="btn.help" data-i18n-aria="btn.help" aria-label="Help">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="10"></circle><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"></path><line x1="12" y1="17" x2="12.01" y2="17"></line></svg>
+      </button>
+      <button class="btn btn--icon topbar__icon" id="btnContact" type="button" data-i18n-title="btn.contact" data-i18n-aria="btn.contact" aria-label="Contact">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M4 4h16c1.1 0 2 .9 2 2v12c0 1.1-.9 2-2 2H4c-1.1 0-2-.9-2-2V6c0-1.1.9-2 2-2z"></path><polyline points="22,6 12,13 2,6"></polyline></svg>
+      </button>
+      <button class="btn btn--icon topbar__icon" id="btnHost" type="button" data-i18n-title="btn.host" aria-label="Base URL">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M10 13a5 5 0 0 0 7.54.54l3-3a5 5 0 0 0-7.07-7.07l-1.72 1.71"></path><path d="M14 11a5 5 0 0 0-7.54-.54l-3 3a5 5 0 0 0 7.07 7.07l1.71-1.71"></path></svg>
+      </button>
+      <button class="btn btn--icon topbar__icon" id="btnLang" type="button" data-i18n-title="btn.lang" aria-label="Language">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="9"></circle><path d="M3 12h18"></path><path d="M12 3a14 14 0 0 1 0 18 14 14 0 0 1 0-18z"></path></svg>
+      </button>
+      <button class="btn btn--icon topbar__icon" id="btnGitHub" type="button" data-i18n-title="btn.github" aria-label="GitHub">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true"><path d="M12 2C6.48 2 2 6.58 2 12.25c0 4.53 2.87 8.37 6.84 9.73.5.1.68-.22.68-.49 0-.24-.01-.88-.01-1.73-2.78.62-3.37-1.37-3.37-1.37-.45-1.18-1.11-1.49-1.11-1.49-.91-.64.07-.62.07-.62 1 .07 1.53 1.06 1.53 1.06.89 1.56 2.34 1.11 2.91.85.09-.66.35-1.11.63-1.37-2.22-.26-4.56-1.14-4.56-5.07 0-1.12.39-2.03 1.03-2.75-.1-.26-.45-1.3.1-2.71 0 0 .84-.28 2.75 1.05a9.3 9.3 0 0 1 5 0c1.91-1.33 2.75-1.05 2.75-1.05.55 1.41.2 2.45.1 2.71.64.72 1.03 1.63 1.03 2.75 0 3.94-2.34 4.81-4.57 5.06.36.32.68.94.68 1.9 0 1.37-.01 2.47-.01 2.81 0 .27.18.6.69.49A10.02 10.02 0 0 0 22 12.25C22 6.58 17.52 2 12 2z"></path></svg>
+      </button>
+      <button class="theme-switch__btn theme-toggle" id="btnTheme" type="button" data-i18n-title="theme.title" data-page-node-id="themeSwitch">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M21 12.8A9 9 0 1 1 11.2 3 7 7 0 0 0 21 12.8z"></path></svg>
+      </button>
+      </div><!-- /.topbar__icons -->
+      <div class="topbar__group">
+        <button class="btn btn--ghost" id="btnReload" type="button" data-edit-only data-i18n="btn.reload" data-page-node-id="OWRMvVwd82BEQBgYcL3bA3">重新读取配置</button>
+        <span class="topbar__sep" aria-hidden="true"></span>
+        <button class="btn btn--ghost" id="btnExport" type="button" data-i18n="btn.export" data-page-node-id="UYGDjYkG3tc8Zf217y1xqE">导出</button>
+        <span class="topbar__sep" aria-hidden="true"></span>
+        <button class="btn btn--ghost" id="btnImport" type="button" data-edit-only data-i18n="btn.import" data-page-node-id="phdWOd5VTDSGVBAUXF47Z5">导入</button>
+      </div>
+      <div class="user-menu" id="userMenu">
+        <button class="user-avatar" id="btnUserMenu" type="button" data-edit-only hidden aria-haspopup="true" aria-expanded="false" data-i18n-title="user.menu" aria-label="用户菜单">
+          <svg class="user-avatar__icon" viewBox="0 0 32 32" aria-hidden="true"><rect width="32" height="32" rx="7" fill="#100f0e"/><path d="M9 22V10l7 7 7-7v12" fill="none" stroke="#ff6b2c" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </button>
+        <div class="user-dropdown" id="userDropdown" hidden role="menu" aria-label="用户菜单">
+          <div class="user-dropdown__head">
+            <span class="user-dropdown__name" id="userMenuName"></span>
+            <span class="user-dropdown__role" id="userMenuRole"></span>
+          </div>
+          <button class="user-dropdown__item" id="btnUserMgmt" type="button" data-edit-only role="menuitem" data-i18n="user.mgmt">用户管理</button>
+          <button class="user-dropdown__item user-dropdown__item--danger" id="btnLogout" type="button" role="menuitem" data-i18n="user.logout">退出</button>
+        </div>
+        <span class="readonly-chip" id="readonlyChip" hidden data-i18n="readonly.chip">只读</span>
+      </div>
+    </div>
+  </header>
+
+  <!-- 只读分享视图横幅（A11）：带 ?share= 令牌访问时显示 -->
+  <div class="readonly-banner" id="readonlyBanner" hidden role="status">
+    <span class="readonly-banner__icon">🔒</span>
+    <span data-i18n="readonly.banner">这是只读分享链接，只能查看，不能修改配置。</span>
+  </div>
+
+  <!-- 离线提示：用 file:// 直接打开、或服务没起来时显示 -->
+  <div class="notice" id="offlineNotice" hidden data-page-node-id="hAH5gbRBYTYV7GW86B6pvw">
+    <span class="notice__dot" data-page-node-id="jDX5deXHYEvKWcFpIjVwk2"></span>
+    <span data-page-node-id="VnTwm2o2FRQywWnZUd0Nt0" data-i18n-html="offline.text"></span>
+  </div>
+
+  <!-- ======================= 三栏 ======================= -->
+  <main class="layout" data-page-node-id="aJYChKc4iNmvx2z65skKQc">
+
+    <!-- 左：接口列表（按分组归拢） -->
+    <aside class="pane reveal" id="paneLeft" data-i18n-aria="pane.left.aria" data-page-node-id="uPtJ6gUCtJyALnXhuQ8UaP">
+      <div class="pane__head" data-page-node-id="latCdJ8oZDAAV60l2dYwPm">
+        <button class="pane__collapse" id="btnToggleLeft" type="button" data-i18n-title="btn.hideLeft"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="2.5"></rect><line x1="8" y1="3.5" x2="8" y2="20.5"></line></svg></button>
+        <div class="pane__acts">
+          <button class="btn btn--icon" id="btnToggleFilter" type="button" data-i18n-title="btn.filter">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><polygon points="22 3 2 3 10 12.46 10 19 14 21 14 12.46 22 3"/></svg>
+          </button>
+          <!-- 批量选择的开关**不在这里**：它已经搬到「全部接口」行右侧（见 selectToggleHtml），
+               因为它是列表级的状态开关，该挨着作用对象，而不是待在面板 chrome 那一排。
+               那一排只留「筛选 / 添分组 / 添接口」这类和面板本身有关的按钮。 -->
+          <button class="btn btn--icon" id="btnAddGroup" type="button" data-edit-only data-i18n-title="btn.addGroup">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M22 19a2 2 0 0 1-2 2H4a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h5l2 3h9a2 2 0 0 1 2 2z"/><line x1="12" y1="11" x2="12" y2="17"/><line x1="9" y1="14" x2="15" y2="14"/></svg>
+          </button>
+          <button class="btn btn--icon" id="btnAddApi" type="button" data-edit-only data-i18n-title="btn.addApi">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"/><polyline points="14 2 14 8 20 8"/><line x1="12" y1="18" x2="12" y2="12"/><line x1="9" y1="15" x2="15" y2="15"/></svg>
+          </button>
+        </div>
+      </div>
+      <div class="pane__body" data-page-node-id="dc75uac85yEhmBN3OM507i">
+        <div class="search-filter-area" id="searchFilterArea">
+          <div class="api-toolbar" id="apiToolbar">
+            <div class="api-toolbar__search"><input type="text" id="apiSearch" data-i18n-placeholder="search.placeholder"></div>
+          </div>
+          <div class="filter-panel" id="filterPanel">
+            <div class="filter-panel__row">
+              <span class="filter-panel__label" data-i18n="filter.status">状态</span>
+              <label class="filter-chip is-on" data-filter-status="all"><input type="radio" name="filterStatus" value="all" checked><span data-i18n="filter.all">全部</span></label>
+              <label class="filter-chip" data-filter-status="enabled"><input type="radio" name="filterStatus" value="enabled"><span data-i18n="filter.enabled">启用</span></label>
+              <label class="filter-chip" data-filter-status="disabled"><input type="radio" name="filterStatus" value="disabled"><span data-i18n="filter.disabled">停用</span></label>
+            </div>
+            <div class="filter-panel__row" id="filterGroupRow">
+              <span class="filter-panel__label" data-i18n="filter.group">分组</span>
+            </div>
+          </div>
+        </div>
+        <div class="api-list" id="apiList" data-page-node-id="YcAzRyw8G6TNzX0A9dgT89"></div>
+      </div>
+    </aside>
+
+    <!-- 中：规则编排（.pane--mid 是容器查询的容器，见 components.css） -->
+    <section class="pane pane--mid reveal" data-i18n-aria="pane.mid.aria" data-page-node-id="msLCMm9R0L6XfXeH9tofS9">
+      <div class="workspace" id="workspace" data-page-node-id="75zwNqFtlaG8G6sYn9qFvk"></div>
+    </section>
+
+    <!-- 右：请求日志 -->
+    <aside class="pane reveal" id="paneRight" data-i18n-aria="pane.right.aria" data-page-node-id="fBJmnyBauiaGUYQSWKrK4o">
+      <div class="pane__head" data-page-node-id="EC0wzFRmCBkd2Bv32Etlj7">
+        <h2 class="pane__title" data-page-node-id="zWbvxZyRLTZ6x3Z2fVqrj1" data-i18n="pane.right.title">请求日志</h2>
+        <span class="tag" id="logCount" data-page-node-id="QqfJIDYFnyQHJ6FpXWFkJJ">0</span>
+        <div class="pane__head-ctrls" data-page-node-id="GbCB7Rt5NCHs0T7MqfmQGy">
+          <label class="switch" data-i18n-title="log.onlyThisApiTitle" data-page-node-id="logApiOnlySwitch">
+            <input type="checkbox" id="logApiOnly" data-page-node-id="Rt5NCHs0T7MqfmQGy1">
+            <span class="switch__track" data-page-node-id="NCHs0T7MqfmQGy2"></span>
+            <span class="switch__thumb" data-page-node-id="s0T7MqfmQGy3"></span>
+            <span class="sr-only" data-i18n="log.onlyThisApi">只看当前接口</span>
+          </label>
+          <label class="switch" data-i18n-title="log.autoRefresh" data-page-node-id="IXLT93wkCGzI5iMgR2BHOQ">
+            <input type="checkbox" id="autoRefresh" checked data-page-node-id="nyQPjKtCHeZD0lT4ecgAkP">
+            <span class="switch__track" data-page-node-id="EziUcqJHBtxI0FmQ0ZXeOI"></span>
+            <span class="switch__thumb" data-page-node-id="SzD1PP8ZkHDtvZX8nwwHfJ"></span>
+            <span class="sr-only" data-page-node-id="JyQITVOdyNDYFhDg3Wg2sN" data-i18n="log.autoRefreshSr">自动刷新日志</span>
+          </label>
+          <button class="btn btn--ghost" id="btnClearLogs" type="button" data-edit-only data-page-node-id="WseOBayXmXDDzFRcn7zafB" data-i18n="log.clear">清空</button>
+        </div>
+        <button class="pane__collapse" id="btnToggleRight" type="button" data-i18n-title="btn.hideRight"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><rect x="3.5" y="3.5" width="17" height="17" rx="2.5"></rect><line x1="16" y1="3.5" x2="16" y2="20.5"></line></svg></button>
+      </div>
+      <div class="pane__body" data-page-node-id="voMATEreKHDJgslhxb5kov">
+        <div class="console-list" id="logList" data-page-node-id="ZmifhSBXFv4rgBiU2vHLn6"></div>
+      </div>
+    </aside>
+
+  </main>
+
+  <!-- ======================= 规则编辑抽屉 ======================= -->
+  <div class="backdrop" id="backdrop" data-page-node-id="o3OrQiiq8pL1VfogS8adRN"></div>
+  <section class="drawer" id="drawer" data-i18n-aria="drawer.aria" aria-hidden="true" data-page-node-id="kbcCcoDMBChJBPYOYoRXZK">
+    <div class="drawer__head" data-page-node-id="xDSiARlKRRZUBi40aOqkl6">
+      <h2 class="drawer__title" id="drawerTitle" data-page-node-id="xdH5uGmerIR88eKBKqaMUp">编辑规则</h2>
+      <button class="btn btn--ghost drawer__close" id="btnDrawerClose" type="button" data-page-node-id="dkNFMPgOlA2VcPKuoEbbZn" data-i18n="drawer.close">关闭</button>
+    </div>
+    <div class="drawer__body" id="drawerBody" data-page-node-id="z2qobBEG9PdC7YwqL8tFnm"></div>
+    <div class="drawer__foot" data-page-node-id="6WOGJ0LR0cJI9R25Hy4xJH">
+      <button class="btn btn--accent" id="btnDrawerSave" type="button" data-page-node-id="yKOF307dtvaYLF9GkIsZiW" data-i18n="drawer.saveRule">保存规则</button>
+      <button class="btn" id="btnDrawerCancel" type="button" data-page-node-id="vbeyDsWWPdm5U2ooT6vdnc" data-i18n="prompt.cancel">取消</button>
+    </div>
+  </section>
+
+  <!-- 输入弹窗：与全站弹窗共用同一套骨架（品牌底板在标题左边 + 标题 + 说明） -->
+  <div class="modal-layer" id="promptLayer" hidden aria-modal="true" role="dialog" aria-labelledby="promptTitle">
+    <form class="modal-card modal-card--narrow" id="promptForm">
+      <div class="modal-card__head">
+        <span class="modal-card__icon" data-modal-icon aria-hidden="true"></span>
+        <div class="modal-card__heading">
+          <h2 class="modal-card__title" id="promptTitle" data-i18n="prompt.title">提示</h2>
+          <p class="modal-card__hint" id="promptHint" hidden></p>
+        </div>
+      </div>
+      <div class="modal-card__body">
+        <div class="field">
+          <input class="input" id="promptInput" type="text" autocomplete="off">
+        </div>
+        <p class="modal-card__error" id="promptError"></p>
+      </div>
+      <div class="modal-card__acts">
+        <button class="btn btn--accent" type="submit" id="promptOk" data-i18n="prompt.ok">确定</button>
+        <button class="btn btn--ghost" type="button" id="promptCancel" data-i18n="prompt.cancel">取消</button>
+      </div>
+    </form>
+  </div>
+
+  <!-- 服务根地址弹窗 -->
+  <div class="modal-layer" id="hostModal" hidden aria-modal="true" role="dialog" aria-labelledby="hostModalTitle">
+    <div class="modal-card">
+      <div class="modal-card__head">
+        <span class="modal-card__icon" data-modal-icon aria-hidden="true"></span>
+        <div class="modal-card__heading">
+          <h2 class="modal-card__title" id="hostModalTitle" data-i18n="host.modalTitle">服务根地址</h2>
+          <p class="modal-card__hint" data-i18n="host.modalHint">被测系统请指向该地址</p>
+        </div>
+      </div>
+      <div class="modal-card__body">
+        <div class="field">
+          <input class="input input--mono" id="hostModalInput" type="text" readonly>
+        </div>
+      </div>
+      <div class="modal-card__acts">
+        <button class="btn btn--accent" id="hostModalCopy" type="button" data-i18n="btn.copyHost">复制根地址</button>
+        <button class="btn btn--ghost" id="hostModalClose" type="button" data-i18n="prompt.cancel">取消</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 联系方式弹窗 -->
+  <div class="modal-layer" id="contactModal" hidden aria-modal="true" role="dialog" aria-labelledby="contactModalTitle">
+    <div class="modal-card">
+      <div class="modal-card__head">
+        <span class="modal-card__icon" data-modal-icon aria-hidden="true"></span>
+        <div class="modal-card__heading">
+          <h2 class="modal-card__title" id="contactModalTitle" data-i18n="contact.modalTitle">联系方式</h2>
+          <p class="modal-card__hint" data-i18n="contact.modalHint">有问题请联系维护者</p>
+        </div>
+      </div>
+      <div class="modal-card__body">
+        <div class="field">
+          <input class="input input--mono" id="contactModalInput" type="text" readonly value="">
+        </div>
+      </div>
+      <div class="modal-card__acts">
+        <button class="btn btn--accent" id="contactModalCopy" type="button" data-i18n="btn.copyContact">复制邮箱</button>
+        <button class="btn btn--ghost" id="contactModalClose" type="button" data-i18n="prompt.close">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 用户管理弹窗（仅部署管理员可见可操作） -->
+  <div class="modal-layer" id="userMgmtModal" hidden aria-modal="true" role="dialog" aria-labelledby="userMgmtTitle">
+    <div class="modal-card">
+      <div class="modal-card__head">
+        <span class="modal-card__icon" data-modal-icon aria-hidden="true"></span>
+        <div class="modal-card__heading">
+          <h2 class="modal-card__title" id="userMgmtTitle" data-i18n="user.mgmtTitle">用户管理</h2>
+          <p class="modal-card__hint" data-i18n="user.mgmtHint">仅部署管理员可增删改登录用户（密码以 SHA-256 存储，不落明文）</p>
+        </div>
+      </div>
+      <div class="modal-card__body">
+        <form id="userMgmtForm" class="user-form">
+          <div class="field">
+            <label class="field__label" for="umUsername" data-i18n="user.username">用户名</label>
+            <input class="input" id="umUsername" type="text" autocomplete="off" maxlength="64">
+          </div>
+          <div class="field">
+            <label class="field__label" for="umPassword" data-i18n="user.password">密码</label>
+            <input class="input" id="umPassword" type="password" autocomplete="new-password">
+          </div>
+        </form>
+        <div class="user-list" id="userList"></div>
+        <p class="user-mgmt__msg" id="userMgmtMsg" hidden></p>
+      </div>
+      <div class="modal-card__acts">
+        <button class="btn btn--accent" id="umSave" type="submit" form="userMgmtForm" data-i18n="user.save">添加 / 更新</button>
+        <button class="btn btn--ghost" id="userMgmtClose" type="button" data-i18n="prompt.cancel">取消</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 变更记录弹窗：谁在什么时候改了哪条规则（多人共用面板时的溯源入口） -->
+  <div class="modal-layer" id="changelogModal" hidden aria-modal="true" role="dialog" aria-labelledby="changelogTitle">
+    <div class="modal-card modal-card--wide">
+      <div class="modal-card__head">
+        <span class="modal-card__icon" data-modal-icon aria-hidden="true"></span>
+        <div class="modal-card__heading">
+          <h2 class="modal-card__title" id="changelogTitle" data-i18n="changelog.title">变更记录</h2>
+          <p class="modal-card__hint" data-i18n="changelog.hint">记录最近 200 次配置改动（谁、什么时候、改了什么），重启后仍保留。</p>
+        </div>
+      </div>
+      <div class="modal-card__body">
+        <div class="changelog-wrap" id="changelogBody"></div>
+      </div>
+      <div class="modal-card__acts">
+        <button class="btn btn--ghost" id="changelogClose" type="button" data-i18n="prompt.close">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 确认弹窗：替代浏览器原生 confirm()。原生弹窗固定挂在窗口顶部、字体配色都由浏览器决定，
+       和站内其他弹窗完全两个长相，所以这里改用同一套骨架 + 危险色。 -->
+  <div class="modal-layer" id="confirmModal" hidden aria-modal="true" role="dialog" aria-labelledby="confirmTitle">
+    <div class="modal-card modal-card--confirm is-danger" id="confirmCard">
+      <div class="modal-card__head">
+        <span class="modal-card__icon" data-modal-icon aria-hidden="true"></span>
+        <div class="modal-card__heading">
+          <h2 class="modal-card__title" id="confirmTitle"></h2>
+        </div>
+      </div>
+      <div class="modal-card__body">
+        <p class="modal-card__text" id="confirmText" hidden></p>
+      </div>
+      <div class="modal-card__acts">
+        <button class="btn btn--danger" id="confirmOk" type="button"></button>
+        <button class="btn btn--ghost" id="confirmCancel" type="button" data-i18n="prompt.cancel">取消</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 只读分享链接管理弹窗（A11） -->
+  <div class="modal-layer" id="shareModal" hidden aria-modal="true" role="dialog" aria-labelledby="shareModalTitle">
+    <div class="modal-card">
+      <div class="modal-card__head">
+        <span class="modal-card__icon" data-modal-icon aria-hidden="true"></span>
+        <div class="modal-card__heading">
+          <h2 class="modal-card__title" id="shareModalTitle" data-i18n="share.title">只读分享链接</h2>
+          <p class="modal-card__hint" data-i18n="share.hint">生成链接发给同事，对方只能看规则、不能改。链接可随时撤销。</p>
+        </div>
+      </div>
+      <div class="modal-card__body">
+        <div class="share-list" id="shareList"></div>
+        <p class="share-empty" id="shareEmpty" data-i18n="share.empty">还没有分享链接</p>
+        <div class="field" style="margin-top:14px">
+          <label class="field__label" for="shareLabel" data-i18n="share.labelPh">给这条链接起个备注（可选）</label>
+          <input class="input" id="shareLabel" type="text" maxlength="60" autocomplete="off">
+        </div>
+      </div>
+      <div class="modal-card__acts">
+        <button class="btn btn--accent" id="btnShareGen" type="button" data-i18n="share.gen">生成分享链接</button>
+        <button class="btn btn--ghost" id="shareModalClose" type="button" data-i18n="prompt.close">关闭</button>
+      </div>
+    </div>
+  </div>
+
+  <div class="ctx-menu" id="ctxMenu" hidden></div>
+
+  <div class="toast-host" id="toastHost" aria-live="polite" data-page-node-id="xnttWLujIexjg0cIt5hTUH"></div>
+
+  <div class="login-layer" id="loginLayer" hidden>
+    <form class="login-card" id="loginForm">
+      <div class="login-card__brand">
+        <span class="login-card__logo" aria-hidden="true">
+          <svg viewBox="0 0 32 32" width="32" height="32"><rect width="32" height="32" rx="7" fill="#100f0e"/><path d="M9 22V10l7 7 7-7v12" fill="none" stroke="#ff6b2c" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"/></svg>
+        </span>
+        <h2 class="login-card__title">Mock Server</h2>
+        <p class="login-card__sub" data-i18n="brand.sub">动态挡板控制台</p>
+      </div>
+      <p class="login-card__hint" data-i18n-html="login.hint">需要登录才能访问控制台。<br>直接调用 mock 接口本身不受此登录影响。</p>
+      <div class="field">
+        <label class="field__label" for="loginUsername" data-i18n="login.username">用户名</label>
+        <input class="input" id="loginUsername" type="text" autocomplete="username" data-i18n-placeholder="login.usernamePh">
+      </div>
+      <div class="field">
+        <label class="field__label" for="loginPassword" data-i18n="login.password">密码</label>
+        <input class="input" id="loginPassword" type="password" autocomplete="current-password" data-i18n-placeholder="login.passwordPh">
+      </div>
+      <div class="login-card__error" id="loginError"></div>
+      <button class="btn btn--accent login-card__submit" type="submit" data-i18n="login.submit">登录</button>
+      <!-- 登录前也能切语言；部署期默认语言见 README 3.3（MOCK_DEFAULT_LANG） -->
+      <div class="login-card__lang" id="loginLang" role="group" data-i18n-aria="login.langAria" aria-label="界面语言">
+        <button class="login-lang" type="button" data-lang="zh-CN">中文</button>
+        <button class="login-lang" type="button" data-lang="en">English</button>
+      </div>
+    </form>
+  </div>
+
+  <script src="scripts/i18n.js"></script>
+  <script src="scripts/main.js"></script>
+</body>
+</html>

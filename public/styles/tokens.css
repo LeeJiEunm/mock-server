@@ -1,0 +1,381 @@
+/* ============================================================================
+ * tokens.css —— 设计令牌 + 主题
+ *
+ * 方向：工业实用（Industrial / utilitarian）· 单一琥珀强调色
+ * 说明：内网测试机无外网，字体走本地字体栈，不依赖 CDN，避免降级闪变。
+ *
+ * 主题机制：
+ *   <html data-theme="light|night|deepnight">  由 main.js 写入
+ *   浏览器 color-scheme：night / deepnight 都按 dark，只有 day 按 light。
+ *   所有颜色一律走变量；组件层不得出现硬编码色值，否则换主题会花掉。
+ * ========================================================================== */
+
+:root {
+  /* ---- 主题：默认 暖黑暗色（避免纯黑压纯白） ---- */
+  color-scheme: dark;
+
+  /* 中性灰阶（对齐参考稿的干净工业语言，不再用暖白半透明边框） */
+  --color-bg: #0b0d10;
+  /* 页面背景：静态深色底（兜底）+ 极光光斑层（body::before 承载，流动动画） */
+  --color-bg-grad:
+    linear-gradient(160deg, #12151b 0%, #0b0d10 55%, #070809 100%);
+  /* 极光层：锥形渐变（conic）围绕中心旋转形成极光漩涡。
+   * background-size 超大 + animation 多层关键帧位置循环 = 旋转流动变换效果。 */
+  --color-bg-mesh:
+    /* 锥形渐变：6 色光带围绕中心，旋转时形成极光漩涡（已去掉对角线性渐变） */
+    conic-gradient(from 0deg at 50% 50%,
+      transparent 0deg,
+      rgba(255,138,61,0.35) 30deg,
+      transparent 60deg,
+      rgba(56,140,255,0.28) 120deg,
+      transparent 150deg,
+      rgba(168,85,247,0.32) 210deg,
+      transparent 240deg,
+      rgba(56,140,255,0.20) 300deg,
+      transparent 330deg
+    );
+  --color-surface: #14171c;
+  --color-surface-2: #181c22;
+  --color-surface-3: #1e232b;
+  --color-border: #262b33;
+  --color-border-strong: #313843;
+
+  /* ---- 玻璃壳层（顶栏 / 栏头 / 搜索筛选区 / 左栏吸顶条）----
+   * 这四处是"壳"，原先用不透明的 --color-surface，把 html 上的极光层整片挡住，造成页面割裂感
+   * （极光只能从没声明背景的 .pane / .pane__body / .workspace 里透出来）。
+   * 颜色一律从 --color-surface 派生（color-mix），**不改 --color-bg-grad / --color-bg-mesh 的渐变定义**，
+   * 换主题时自动跟随，不必四套主题各调一次色值。
+   *   薄档 --color-glass       = 顶栏 / 两个栏头 / 搜索筛选区（底下只有极光，不吃滚动内容）
+   *   厚档 --color-glass-thick = 左栏吸顶条（唯一真压着滚动内容的壳，透太多会和滚过的卡片叠影）
+   * 四套主题各留一份声明，是为了以后想按主题分别调透明度时不必改结构。 */
+  --color-glass: color-mix(in srgb, var(--color-surface) 78%, transparent);
+  --color-glass-thick: color-mix(in srgb, var(--color-surface) 90%, transparent);
+
+  /* ---- 文字 ---- */
+  --color-text: #e6e9ee;
+  --color-muted: #9aa4b2;
+  --color-faint: #828d9b;
+
+  /* ---- 唯一强调色：琥珀（只给关键动作） ---- */
+  --color-accent: #f26a1b;
+  --color-accent-ink: #1a0d05;
+  --color-accent-soft: rgba(242, 106, 27, 0.13);
+  --color-accent-line: rgba(242, 106, 27, 0.42);
+  --color-accent-hover: #ff8149;
+
+  /* 品牌名渐变（左上角 mock·server 文字渐变，对齐参考稿） */
+  --grad-a: #ffab5e;
+  --grad-b: #f26a1b;
+  --grad-c: #e8590c;
+
+  /* ---- 状态色：小面积使用，且必须配文字标签 ---- */
+  --color-ok: #3fb950;
+  --color-ok-soft: rgba(63, 185, 80, 0.13);
+  --color-ok-line: rgba(63, 185, 80, 0.32);
+  --color-warn: #d29922;
+  --color-warn-soft: rgba(210, 153, 34, 0.12);
+  --color-warn-line: rgba(210, 153, 34, 0.32);
+  --color-bad: #f85149;
+  --color-bad-soft: rgba(248, 81, 73, 0.13);
+  --color-bad-line: rgba(248, 81, 73, 0.32);
+  --color-bad-ink: #1a0d05;
+  --color-bad-hover: #ff7378;
+  --color-info: #58a6ff;
+  --color-info-soft: rgba(88, 166, 255, 0.14);
+  --color-info-line: rgba(88, 166, 255, 0.32);
+
+  /* ---- 组件专用色 ---- */
+  --color-topbar: rgba(20, 23, 28, 0.88);
+  --color-scrollbar: rgba(130, 140, 155, 0.18);
+  --color-scrollbar-hover: rgba(130, 140, 155, 0.34);
+  --color-backdrop: rgba(8, 10, 13, 0.60);
+  --color-code-ink: #c9d1d9;
+  --color-switch-knob: var(--color-muted);
+
+  /* ---- 氛围层强度（调低，贴近参考稿干净感） ---- */
+  --atmo-accent: rgba(242, 106, 27, 0.12);
+  --atmo-info: rgba(88, 166, 255, 0.08);
+  --grain-opacity: 0.018;
+
+  /* ---- 字体：展示字等宽（工业感），正文中文优先 ---- */
+  --font-mono: "JetBrains Mono", "IBM Plex Mono", "SFMono-Regular", "SF Mono", Menlo,
+    Consolas, "Liberation Mono", monospace;
+  --font-body: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans SC",
+    "Source Han Sans SC", "IBM Plex Sans", "Helvetica Neue", sans-serif;
+
+  /* ---- 字阶：6 档，相邻档差 ≥1.17，每档有唯一用途 ----
+   * 旧版 8 档里 10/11/12 三档挤在一起（占全站用量 87%），26/34 两档从未被引用，
+   * 结果是一片"小字平原"，看不出层级。现压成 6 档并整体上调。 */
+  --text-xs: 12px;    /* 辅助：时间戳、标签、meta、字段标签（≥12px，满足全页最小字号断言） */
+  --text-sm: 13px;    /* 次要：路径、说明、列表项主文字、按钮（舒适档基准，贴近参考稿节奏） */
+  --text-base: 14px;  /* 正文基准（舒适档） */
+  --text-md: 17px;    /* 卡片标题、顶栏品牌字、抽屉标题 */
+  --text-lg: 22px;    /* 区块标题、接口头卡标题 */
+  --text-xl: 28px;    /* 展示层：空态大标题、关键大数字 */
+  --text-2xl: 36px;   /* 极少数：全屏空态 */
+
+  /* ---- 字重：补上中间档，标题才压得住正文 ---- */
+  --fw-normal: 400;   /* 正文 */
+  --fw-medium: 500;   /* 强调：列表项名称、字段值 */
+  --fw-bold: 700;     /* 标题、小节标签、关键数字 */
+
+  /* ---- 间距梯度 ---- */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 24px;
+  --space-6: 40px;
+  --space-7: 64px;
+
+  /* ---- 圆角：克制，工业风偏小 ---- */
+  --radius-sm: 3px;
+  --radius-md: 6px;
+  --radius-lg: 10px;
+  --radius-xl: 16px;    /* 大面板：弹窗卡片、弹窗里的品牌底板 */
+  --radius-full: 999px; /* 胶囊：弹窗按钮 */
+
+  /* ---- 阴影：三级高度 ---- */
+  --shadow-1: 0 2px 8px rgba(0, 0, 0, 0.28);
+  --shadow-2: 0 8px 28px rgba(0, 0, 0, 0.36);
+  --shadow-3: 0 24px 64px rgba(0, 0, 0, 0.48);
+
+  /* ---- 动效 ---- */
+  --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+  --dur-fast: 160ms;
+  --dur-base: 320ms;
+  --dur-slow: 640ms;
+
+  /* ---- 布局 ---- */
+  --sidebar-w: 248px;
+  --console-w: 360px;
+  --topbar-h: 56px;
+}
+
+/* ============================================================================
+ * 浅色主题
+ *   同一个信息层级关系，只是把"暖黑"换成"暖白"：
+ *   底色偏暖白（不是纯白，避免刺眼），卡片用纯白浮起来。
+ * ========================================================================== */
+
+:root[data-theme="light"] {
+  color-scheme: light;
+
+  --color-bg: #f6f7f9;
+  /* 页面背景：静态浅色底（兜底）+ 极光光斑层（柔和同色系，不刺眼） */
+  --color-bg-grad:
+    linear-gradient(160deg, #fdfeff 0%, #f6f7f9 55%, #edeff4 100%);
+  /* 极光层：浅色底用更柔和的低透明度 */
+  --color-bg-mesh:
+    conic-gradient(from 0deg at 50% 50%,
+      transparent 0deg,
+      rgba(255,122,61,0.20) 30deg,
+      transparent 60deg,
+      rgba(59,130,246,0.16) 120deg,
+      transparent 150deg,
+      rgba(255,122,61,0.18) 210deg,
+      transparent 240deg,
+      rgba(59,130,246,0.12) 300deg,
+      transparent 330deg
+    );
+  --color-surface: #ffffff;
+  --color-surface-2: #fbfbfc;
+  --color-surface-3: #f0f2f5;
+  --color-border: #e2e5ea;
+  --color-border-strong: #d0d7de;
+
+  /* 玻璃壳层：见文件顶部（默认主题）的说明；四套主题各一份，便于按主题分别调透明度 */
+  --color-glass: color-mix(in srgb, var(--color-surface) 78%, transparent);
+  --color-glass-thick: color-mix(in srgb, var(--color-surface) 90%, transparent);
+
+  --color-text: #1a1f27;
+  --color-muted: #5a6472;
+  --color-faint: #5f6b7a;
+
+  --color-accent: #e8590c;
+  --color-accent-ink: #ffffff;
+  --color-accent-soft: rgba(232, 89, 12, 0.10);
+  --color-accent-line: rgba(232, 89, 12, 0.40);
+  --color-accent-hover: #c24e0d;
+
+  --color-ok: #1a7f37;
+  --color-ok-soft: rgba(26, 127, 55, 0.10);
+  --color-ok-line: rgba(26, 127, 55, 0.34);
+  --color-warn: #8a5a00;
+  --color-warn-soft: rgba(138, 90, 0, 0.10);
+  --color-warn-line: rgba(138, 90, 0, 0.32);
+  --color-bad: #cf222e;
+  --color-bad-soft: rgba(207, 34, 46, 0.09);
+  --color-bad-line: rgba(207, 34, 46, 0.32);
+  --color-bad-ink: #ffffff;
+  --color-bad-hover: #b31b25;
+  --color-info: #0969da;
+  --color-info-soft: rgba(9, 105, 218, 0.10);
+  --color-info-line: rgba(9, 105, 218, 0.30);
+
+  --color-topbar: rgba(255, 255, 255, 0.88);
+  --color-scrollbar: rgba(90, 100, 114, 0.22);
+  --color-scrollbar-hover: rgba(90, 100, 114, 0.38);
+  --color-backdrop: rgba(40, 45, 52, 0.28);
+  --color-code-ink: #1a1f27;
+  --color-switch-knob: #5f6b7a;
+
+  --atmo-accent: rgba(232, 89, 12, 0.06);
+  --atmo-info: rgba(9, 105, 218, 0.05);
+  --grain-opacity: 0.010;
+
+  --shadow-1: 0 1px 3px rgba(40, 32, 24, 0.08), 0 1px 2px rgba(40, 32, 24, 0.04);
+  --shadow-2: 0 8px 24px rgba(40, 32, 24, 0.12);
+  --shadow-3: 0 24px 56px rgba(40, 32, 24, 0.18);
+}
+
+/* ============================================================================
+ * 夜晚主题：比深夜更亮、偏冷的暗色，用来和深夜做出区分
+ * ========================================================================== */
+:root[data-theme="night"] {
+  color-scheme: dark;
+
+  --color-bg: #0e1726;
+  /* 页面背景：静态深蓝底 + 极光光斑层（蓝/青/靛） */
+  --color-bg-grad:
+    linear-gradient(160deg, #152942 0%, #0e1726 55%, #0a101d 100%);
+  /* 极光层：夜色主题 — 蓝青冷色调为主 */
+  --color-bg-mesh:
+    conic-gradient(from 0deg at 50% 50%,
+      transparent 0deg,
+      rgba(56,140,255,0.32) 30deg,
+      transparent 60deg,
+      rgba(34,211,238,0.26) 120deg,
+      transparent 150deg,
+      rgba(56,140,255,0.28) 210deg,
+      transparent 240deg,
+      rgba(34,211,238,0.18) 300deg,
+      transparent 330deg
+    );
+  --color-surface: #162032;
+  --color-surface-2: #1c283d;
+  --color-surface-3: #243349;
+  --color-border: #2a384e;
+  --color-border-strong: #36465f;
+
+  /* 玻璃壳层：见文件顶部（默认主题）的说明 */
+  --color-glass: color-mix(in srgb, var(--color-surface) 78%, transparent);
+  --color-glass-thick: color-mix(in srgb, var(--color-surface) 90%, transparent);
+
+  --color-text: #e6edf3;
+  --color-muted: #9fb0c3;
+  --color-faint: #8c9fb2;   /* 夜晚主题：surface-3 上对比度 4.14→4.69，满足 ≥4.5 可读性断言 */
+
+  --color-accent: #f26a1b;
+  --color-accent-ink: #1a0d05;
+  --color-accent-soft: rgba(242, 106, 27, 0.13);
+  --color-accent-line: rgba(242, 106, 27, 0.42);
+  --color-accent-hover: #ff8149;
+
+  --color-ok: #3fb950;
+  --color-ok-soft: rgba(63, 185, 80, 0.13);
+  --color-ok-line: rgba(63, 185, 80, 0.32);
+  --color-warn: #d29922;
+  --color-warn-soft: rgba(210, 153, 34, 0.12);
+  --color-warn-line: rgba(210, 153, 34, 0.32);
+  --color-bad: #f85149;
+  --color-bad-soft: rgba(248, 81, 73, 0.13);
+  --color-bad-line: rgba(248, 81, 73, 0.32);
+  --color-bad-ink: #1a0d05;
+  --color-bad-hover: #ff7378;
+  --color-info: #58a6ff;
+  --color-info-soft: rgba(88, 166, 255, 0.14);
+  --color-info-line: rgba(88, 166, 255, 0.32);
+
+  --color-topbar: rgba(22, 32, 50, 0.88);
+  --color-scrollbar: rgba(159, 176, 195, 0.18);
+  --color-scrollbar-hover: rgba(159, 176, 195, 0.34);
+  --color-backdrop: rgba(6, 11, 20, 0.60);
+  --color-code-ink: #c9d6e3;
+  --color-switch-knob: var(--color-muted);
+
+  --atmo-accent: rgba(242, 106, 27, 0.12);
+  --atmo-info: rgba(88, 166, 255, 0.08);
+  --grain-opacity: 0.018;
+
+  --shadow-1: 0 2px 8px rgba(0, 0, 0, 0.28);
+  --shadow-2: 0 8px 28px rgba(0, 0, 0, 0.36);
+  --shadow-3: 0 24px 64px rgba(0, 0, 0, 0.48);
+}
+
+/* ============================================================================
+ * 深夜主题：比夜晚更暗、更暖的近黑，做出和"夜晚"的清晰区分
+ *   （夜晚 = 冷调蓝灰、中暗；深夜 = 暖调近黑、极暗）
+ * ========================================================================== */
+:root[data-theme="deepnight"] {
+  color-scheme: dark;
+
+  --color-bg: #0a0810;
+  /* 页面背景：静态深紫底（兜底）+ 极光光斑层（紫/品红/靛）。
+   * 注：底不再含纯黑（末段原为 #050406 纯黑），否则极光 conic 的 transparent 间隙会露出黑块。 */
+  --color-bg-grad:
+    linear-gradient(160deg, #140f1c 0%, #0c0a14 55%, #0a0810 100%);
+  /* 极光层：深黑主题 — 紫粉色调为主 */
+  --color-bg-mesh:
+    conic-gradient(from 0deg at 50% 50%,
+      transparent 0deg,
+      rgba(168,85,247,0.32) 30deg,
+      transparent 60deg,
+      rgba(236,72,153,0.26) 120deg,
+      transparent 150deg,
+      rgba(168,85,247,0.28) 210deg,
+      transparent 240deg,
+      rgba(99,102,241,0.18) 300deg,
+      transparent 330deg
+    );
+  --color-surface: #100f14;
+  --color-surface-2: #16151b;
+  --color-surface-3: #1f1e26;
+  --color-border: #211f29;
+  --color-border-strong: #2c2a36;
+
+  /* 玻璃壳层：见文件顶部（默认主题）的说明 */
+  --color-glass: color-mix(in srgb, var(--color-surface) 78%, transparent);
+  --color-glass-thick: color-mix(in srgb, var(--color-surface) 90%, transparent);
+
+  --color-text: #e6e9ee;
+  --color-muted: #9aa4b2;
+  --color-faint: #828d9b;
+
+  --color-accent: #f26a1b;
+  --color-accent-ink: #1a0d05;
+  --color-accent-soft: rgba(242, 106, 27, 0.13);
+  --color-accent-line: rgba(242, 106, 27, 0.42);
+  --color-accent-hover: #ff8149;
+
+  --color-ok: #3fb950;
+  --color-ok-soft: rgba(63, 185, 80, 0.13);
+  --color-ok-line: rgba(63, 185, 80, 0.32);
+  --color-warn: #d29922;
+  --color-warn-soft: rgba(210, 153, 34, 0.12);
+  --color-warn-line: rgba(210, 153, 34, 0.32);
+  --color-bad: #f85149;
+  --color-bad-soft: rgba(248, 81, 73, 0.13);
+  --color-bad-line: rgba(248, 81, 73, 0.32);
+  --color-bad-ink: #1a0d05;
+  --color-bad-hover: #ff7378;
+  --color-info: #58a6ff;
+  --color-info-soft: rgba(88, 166, 255, 0.14);
+  --color-info-line: rgba(88, 166, 255, 0.32);
+
+  --color-topbar: rgba(16, 15, 20, 0.90);
+  --color-scrollbar: rgba(130, 140, 155, 0.16);
+  --color-scrollbar-hover: rgba(130, 140, 155, 0.30);
+  --color-backdrop: rgba(5, 4, 7, 0.66);
+  --color-code-ink: #c9d1d9;
+  --color-switch-knob: var(--color-muted);
+
+  --atmo-accent: rgba(242, 106, 27, 0.10);
+  --atmo-info: rgba(88, 166, 255, 0.07);
+  --grain-opacity: 0.022;
+
+  --shadow-1: 0 2px 8px rgba(0, 0, 0, 0.34);
+  --shadow-2: 0 8px 28px rgba(0, 0, 0, 0.42);
+  --shadow-3: 0 24px 64px rgba(0, 0, 0, 0.56);
+}
+

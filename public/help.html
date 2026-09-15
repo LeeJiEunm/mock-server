@@ -1,0 +1,211 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Mock Server · 操作手册</title>
+<style>
+  /* 自包含样式，无外部依赖；配色取向与控制台一致（暖白底 + 橙色强调） */
+  :root {
+    --bg: #f6f4f0; --card: #ffffff; --line: #e5e0d8; --text: #2b2723;
+    --muted: #8a8378; --accent: #e56a2e; --accent-soft: #fdeee4;
+    --code-bg: #2b2723; --code-text: #f0ece5; --ok: #2e7d4f;
+  }
+  * { box-sizing: border-box; margin: 0; padding: 0; }
+  body {
+    font-family: -apple-system, "PingFang SC", "Microsoft YaHei", sans-serif;
+    background: var(--bg); color: var(--text); line-height: 1.75; font-size: 15px;
+  }
+  .layout { display: flex; max-width: 1200px; margin: 0 auto; gap: 32px; padding: 32px 24px 80px; }
+  nav {
+    flex: none; width: 220px; position: sticky; top: 32px; align-self: flex-start;
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px; padding: 18px 8px;
+  }
+  nav .brand { font-weight: 700; padding: 0 14px 12px; color: var(--accent); }
+  nav a {
+    display: block; padding: 7px 14px; color: var(--text); text-decoration: none;
+    border-radius: 8px; font-size: 14px;
+  }
+  nav a:hover { background: var(--accent-soft); color: var(--accent); }
+  main { flex: 1; min-width: 0; }
+  header.hero { margin-bottom: 28px; }
+  header.hero h1 { font-size: 26px; margin-bottom: 8px; }
+  header.hero p { color: var(--muted); }
+  section {
+    background: var(--card); border: 1px solid var(--line); border-radius: 12px;
+    padding: 26px 30px; margin-bottom: 22px; scroll-margin-top: 24px;
+  }
+  h2 { font-size: 19px; margin-bottom: 14px; padding-bottom: 10px; border-bottom: 1px solid var(--line); }
+  h2 .no { color: var(--accent); margin-right: 8px; font-family: ui-monospace, Menlo, monospace; }
+  h3 { font-size: 15.5px; margin: 18px 0 8px; }
+  p { margin-bottom: 10px; }
+  ul, ol { padding-left: 22px; margin-bottom: 12px; }
+  li { margin-bottom: 6px; }
+  table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 14px; }
+  th, td { border: 1px solid var(--line); padding: 8px 12px; text-align: left; vertical-align: top; }
+  th { background: #faf8f4; font-weight: 600; white-space: nowrap; }
+  code {
+    font-family: ui-monospace, Menlo, Consolas, monospace; font-size: 13px;
+    background: var(--accent-soft); color: #b34a12; border-radius: 4px; padding: 1px 6px;
+  }
+  .term {
+    background: var(--code-bg); color: var(--code-text); border-radius: 8px;
+    padding: 12px 16px; font-family: ui-monospace, Menlo, monospace; font-size: 13px;
+    overflow-x: auto; margin: 10px 0 14px; white-space: pre;
+  }
+  .tip {
+    background: var(--accent-soft); border-left: 3px solid var(--accent);
+    border-radius: 0 8px 8px 0; padding: 10px 14px; margin: 12px 0; font-size: 14px;
+  }
+  .tip b { color: var(--accent); }
+  img.shot { width: 100%; border: 1px solid var(--line); border-radius: 10px; margin: 10px 0 6px; display: block; }
+  figcaption { font-size: 13px; color: var(--muted); text-align: center; margin-bottom: 12px; }
+  .badge {
+    display: inline-block; font-size: 12px; background: var(--accent-soft); color: #b34a12;
+    border-radius: 999px; padding: 2px 10px; margin-left: 6px; vertical-align: 2px;
+  }
+  footer { text-align: center; color: var(--muted); font-size: 13px; margin-top: 30px; }
+  @media (max-width: 860px) { .layout { flex-direction: column; } nav { position: static; width: 100%; } }
+</style>
+</head>
+<body>
+<div class="layout">
+
+  <nav>
+    <div class="brand">📘 操作手册</div>
+    <a href="#start">一、快速上手</a>
+    <a href="#tour">二、界面导览</a>
+    <a href="#rules">三、配置挡板规则</a>
+    <a href="#try">四、试打一枪</a>
+    <a href="#logs">五、查看请求日志</a>
+    <a href="#share">六、分享链接给同事</a>
+    <a href="#login">七、登录与账号</a>
+    <a href="#faq">八、常见问题</a>
+  </nav>
+
+  <main>
+    <header class="hero">
+      <h1>Mock Server 操作手册</h1>
+      <p>给测试 / 联调同事的快速上手指南 —— 5 分钟学会用挡板接口代替真实上游做联调。</p>
+    </header>
+
+    <!-- ====================== 一、快速上手 ====================== -->
+    <section id="start">
+      <h2><span class="no">01</span>快速上手</h2>
+      <p>这是一个<b>可配置的假接口（挡板 / mock）服务</b>：被测系统不连真实上游，改连这里，就能按你配的规则返回成功、失败、超时等各种场景。</p>
+      <ol>
+        <li>浏览器打开管理界面：<code>http://&lt;挡板机IP&gt;:18080/</code>（有账号就先登录）；</li>
+        <li>左栏找到目标接口（或新建成一个，见<a href="#rules">第三节</a>）；</li>
+        <li>把<b>被测系统的上游地址</b>改成挡板地址：<code>http://&lt;挡板机IP&gt;:18080</code>（结尾不要带 <code>/</code>）；</li>
+        <li>被测系统正常发起调用 → 右栏日志立刻能看到每次请求和返回；</li>
+        <li>要改返回内容？中栏改规则、保存，<b>立即生效，不用重启</b>。</li>
+      </ol>
+      <div class="tip"><b>调用规则：</b>挡板地址 = 根地址 + <code>/模块/接口路径</code>。比如接口配的是模块 <code>demo</code>、路径 <code>sample</code>，完整调用地址就是 <code>http://127.0.0.1:18080/demo/sample</code>。点接口卡片上的调用地址条可直接复制。</div>
+    </section>
+
+    <!-- ====================== 二、界面导览 ====================== -->
+    <section id="tour">
+      <h2><span class="no">02</span>界面导览</h2>
+      <figure>
+        <img class="shot" src="help/shot-console.png" alt="控制台总览">
+        <figcaption>控制台总览：左（接口列表）· 中（规则编排）· 右（实时请求日志）</figcaption>
+      </figure>
+      <table>
+        <tr><th>区域</th><th>是什么</th><th>常用操作</th></tr>
+        <tr><td><b>左栏</b></td><td>接口列表，按分组归拢</td><td>新建分组 / 接口；开关接口；搜索过滤；编辑 / 删除</td></tr>
+        <tr><td><b>中栏</b></td><td>当前接口的规则编排 + 试打</td><td>加规则、调顺序（↑↓）、编辑接口、看变更记录</td></tr>
+        <tr><td><b>右栏</b></td><td>实时请求日志</td><td>自动刷新；只看当前接口；点条目看请求 / 返回详情</td></tr>
+        <tr><td><b>顶栏</b></td><td>全局动作与入口</td><td>分享、帮助（本页）、联系维护者、根地址、语言、GitHub、主题、重读配置、导出 / 导入</td></tr>
+      </table>
+      <p>顶栏左侧的 <b>接口 / 规则 / 运行时长</b> 是服务健康概览；绿色「运行中」表示与服务的连接正常。</p>
+    </section>
+
+    <!-- ====================== 三、配置挡板规则 ====================== -->
+    <section id="rules">
+      <h2><span class="no">03</span>配置挡板规则</h2>
+      <h3>3.1 新建接口</h3>
+      <p>左栏「+ 分组」建个分组（只影响列表归类，不影响路径）→「+ 接口」填名称、模块、路径，下方会实时预览调用地址。</p>
+      <h3>3.2 一条规则 = 条件 + 响应</h3>
+      <p>中栏「+ 新增规则」。规则自上而下匹配，<b>命中即停</b>，所以宽泛的条件放下面、具体的放上面（可拖拽调整）。</p>
+      <table>
+        <tr><th>要模拟什么</th><th>怎么配</th></tr>
+        <tr><td>按请求字段返回不同结果</td><td>条件：请求体 <code>code</code> = <code>500</code> → 响应状态码 500</td></tr>
+        <tr><td>模拟超时 / 慢接口</td><td>响应里加延迟（如 3000ms）</td></tr>
+        <tr><td>模拟业务失败</td><td>响应里自定义状态码 + 报文（如 <code>{"success":false}</code>）</td></tr>
+        <tr><td>原样回显（验联通）</td><td>用「回显」模板建接口，收到什么原样返回</td></tr>
+        <tr><td>部分真实 + 部分挡板</td><td>接口设置里配「代理回源」真实服务地址</td></tr>
+        <tr><td>数组逐项不同返回</td><td>脚本响应模式（进阶，见 README 第七章）</td></tr>
+      </table>
+      <div class="tip"><b>必配兜底：</b>所有条件都不命中时返回的「兜底响应」。漏配的话，未命中请求会拿到 404，排查时容易误判。</div>
+    </section>
+
+    <!-- ====================== 四、试打一枪 ====================== -->
+    <section id="try">
+      <h2><span class="no">04</span>试打一枪</h2>
+      <p>中栏「试打一枪」：填请求体 / 参数 / 请求头 → 点「发送」，<b>不经过网络</b>，直接按当前规则判定：</p>
+      <ul>
+        <li>右侧列出每条规则命中还是跳过、原因是什么，命中的高亮；</li>
+        <li>直接给出将返回的内容，配错当场就能发现；</li>
+        <li>试打会记一条带「试打」标签的日志，方便和真实流量对照。</li>
+      </ul>
+      <p><b>推荐顺序：</b>配完规则 → 先试打自证 → 再让被测系统连上来。</p>
+    </section>
+
+    <!-- ====================== 五、查看请求日志 ====================== -->
+    <section id="logs">
+      <h2><span class="no">05</span>查看请求日志</h2>
+      <p>右栏每 3 秒自动刷新。每条日志：时间、调用路径、状态码、耗时、命中的规则徽标（如 R1）。</p>
+      <table>
+        <tr><th>我想…</th><th>操作</th></tr>
+        <tr><td>只看某个接口的请求</td><td>打开右栏「只看当前接口」开关</td></tr>
+        <tr><td>看请求体 / 返回体详情</td><td>点开那条日志</td></tr>
+        <tr><td>从日志跳到对应规则</td><td>点日志里的规则徽标（R1…），中栏会滚动并高亮</td></tr>
+        <tr><td>暂停自动刷新 / 清空</td><td>右栏第二个开关 / Clear 按钮</td></tr>
+      </table>
+    </section>
+
+    <!-- ====================== 六、分享链接 ====================== -->
+    <section id="share">
+      <h2><span class="no">06</span>分享链接给同事</h2>
+      <p>想让别人<b>只看不改</b>地查看规则？顶栏分享图标 → 「生成分享链接」：</p>
+      <figure>
+        <img class="shot" src="help/shot-share.png" alt="分享链接弹窗">
+        <figcaption>分享弹窗：每条链接左侧 📋 图标点击即复制，右侧可随时撤销</figcaption>
+      </figure>
+      <ul>
+        <li>对方打开链接只能查看规则，<b>改不了配置</b>（服务端同样拦截写请求）；</li>
+        <li>链接可随时撤销，撤销后对方打开会提示"链接已失效"；</li>
+        <li>每条链接可以写备注（比如给谁用的），方便管理。</li>
+      </ul>
+      <div class="tip"><b>只读端口模式（部署选项）：</b>部署时配置 <code>READONLY_PORT</code> 后，分享链接走独立只读端口——对方把链接里的 <code>?share=</code> 去掉也依然只读，安全性最高。</div>
+    </section>
+
+    <!-- ====================== 七、登录与账号 ====================== -->
+    <section id="login">
+      <h2><span class="no">07</span>登录与账号</h2>
+      <ul>
+        <li>部署时开启登录保护的话，打开界面先登录；<b>调用挡板接口本身不受登录影响</b>，被测系统照常连；</li>
+        <li>密码忘了找部署同事重置；账号由管理员在头像菜单「Users」里增删；</li>
+        <li>界面语言（中文 / English）在顶栏 🌐 或登录页切换，记住你的选择。</li>
+      </ul>
+    </section>
+
+    <!-- ====================== 八、FAQ ====================== -->
+    <section id="faq">
+      <h2><span class="no">08</span>常见问题</h2>
+      <table>
+        <tr><th>现象</th><th>原因与处理</th></tr>
+        <tr><td>被测系统连不上挡板</td><td>检查上游地址写法：<code>http://IP:18080</code>，结尾不带 <code>/</code>；确认挡板服务在跑（顶栏「运行中」）</td></tr>
+        <tr><td>返回 404</td><td>路径写错（模块 / 接口对不上），或该接口没有配「兜底响应」且条件都未命中</td></tr>
+        <tr><td>改了规则没生效</td><td>规则没点保存；或浏览器缓存，<code>Cmd+Shift+R</code> 强刷页面</td></tr>
+        <tr><td>分享链接打不开</td><td>链接被撤销了，找分享的人重新生成</td></tr>
+        <tr><td>想要某个"奇怪"的场景配不出来</td><td>先试打验证条件写法；还不行找维护者（顶栏 ✉）</td></tr>
+      </table>
+      <p>更多部署与运维细节（systemd / Docker / 导入导出 / 管理接口），见项目根目录 <code>README.md</code> 与 <code>docs/操作手册.md</code>。</p>
+    </section>
+
+    <footer>Mock Server · 零依赖动态挡板 · 本页由顶栏 ❓ 图标随时打开</footer>
+  </main>
+</div>
+</body>
+</html>

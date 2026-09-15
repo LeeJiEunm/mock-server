@@ -1,0 +1,284 @@
+/* ============================================================================
+ * base.css —— 重置、排版、焦点、氛围层、动效降级
+ * ========================================================================== */
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body {
+  height: 100%;
+}
+
+body {
+  margin: 0;
+  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  background: transparent; /* 透明：极光层已挂到 html 根背景，body 透出它 */
+  color: var(--color-text);
+  font-family: var(--font-body);
+  font-size: var(--text-base);
+  line-height: 1.7;      /* 中文正文行高 ≥1.7 */
+  letter-spacing: 0.02em; /* 中文正文加一丝字距，拉丁字形不适用（见下方 .mono 重置） */
+  -webkit-font-smoothing: antialiased;
+  overflow: hidden; /* 应用型界面：整体不滚动，各栏内部滚动 */
+}
+
+/* 极光层：拆成独立固定层 .aurora-bg（见 index.html 顶部 <div class="aurora-bg">）。
+ * 关键修复（性能）：原版把动画写在 html 的 background-position 上——background-position
+ * 动画无法走 GPU 合成，每帧主线程重绘整屏巨型渐变，才是「渐变模式所有操作卡 ~1s」根因
+ * （纯色模式关掉它所以流畅）。
+ * 观感保持：原版的「流动」= conic 中心扫过视口并移出。本版把这个扫动 1:1 还原为
+ * transform: translate（GPU 合成、只栅格化一次）。要点：主层放大到 300%、平移幅度 ±30%，
+ * 使 conic 中心能真正扫过视口并移出画面（不是停在正中央）——这才是「流淌」的来源。
+ * 辅助辉光 .atmosphere::before 还原原版 at 30% 20% 偏置 + 平移漂移（柔光漂，非中心光柱）。
+ * html 仅留纯色兜底底。 */
+html {
+  background-color: var(--color-bg);
+}
+
+/* 主极光（mesh + 基础渐变）：沿用原 --color-bg-mesh / --color-bg-grad 色彩定义。
+ * 元素 oversize 到 300%（inset:-100%），靠 transform: translate 在 ±30% 范围内平移扫动——
+ * 等价于原 background-position 四角扫动，但走 GPU 合成（只栅格化一次、之后纯合成），
+ * 主线程不再每帧重绘。±30%（相对 300% 元素 = ±0.9 视口）保证 conic 中心扫过视口并移出，
+ * 且任意相位都完整覆盖视口、不露边。纯平移、无 scale，不触发重栅格化。 */
+.aurora-bg {
+  position: fixed;
+  inset: -100%;                /* 300% 尺寸：覆盖视口并留平移余量 */
+  /* 必须用「负」z-index：极光层要在所有内容之下（等价于原版挂在 html 背景上的层级）。
+   * 若用 z-index:0（定位元素层），它会盖住一切「未定位的静态块」——例如只读分享横幅
+   * #readonlyBanner、离线提示 #offlineNotice（两者都是 position:static），
+   * 表现为「渐变主题下横幅整体消失、纯色主题正常」（2026-09-15 实测复现并修复）。
+   * 负值让它落在块级背景之下、仅浮在 html 兜底底色之上；body 是 transparent 故能透出。 */
+  z-index: -1;
+  pointer-events: none;
+  background-image: var(--color-bg-mesh), var(--color-bg-grad);
+  background-size: 100% 100%, 100% 100%;
+  background-position: 50% 50%, 50% 50%;
+  background-repeat: no-repeat, no-repeat;
+  will-change: transform;
+  animation: auroraSweep 40s linear infinite;
+}
+
+/* 还原原 auroraFlow 的四角扫动轨迹（顺时针：左上→右上→右下→左下→回左上），无缝循环。
+ * 关键：平移幅度大到让 conic 中心扫过视口并移出，而不是停在正中央。 */
+@keyframes auroraSweep {
+  0%   { transform: translate(30%, 30%); }
+  25%  { transform: translate(-30%, 30%); }
+  50%  { transform: translate(-30%, -30%); }
+  75%  { transform: translate(30%, -30%); }
+  100% { transform: translate(30%, 30%); }
+}
+
+/* 辅助辉光层（叠加在主 mesh 之上增强流动感）；仅渐变模式显示、纯色模式隐藏。
+ * 还原原 .atmosphere::before：conic 置于 30% 20%（偏离正中央）、opacity 0.6（很淡），
+ * 同样改为 transform 平移漂移（等效原 background-position 0→200% 扫动），走 GPU 合成。
+ * 因 conic 偏离中心且极淡，观感是「柔光漂移」而非「中心光柱」。 */
+html[data-aurora="on"] .atmosphere::before {
+  content: "";
+  position: fixed;
+  inset: -50%;                 /* 200% 尺寸 */
+  pointer-events: none;
+  z-index: 1;
+  background:
+    conic-gradient(from 90deg at 30% 20%,
+      transparent 0deg,
+      var(--atmo-accent) 45deg,
+      transparent 90deg,
+      var(--atmo-info) 180deg,
+      transparent 225deg,
+      var(--atmo-accent) 270deg,
+      transparent 315deg
+    );
+  background-size: 100% 100%;
+  opacity: 0.6;
+  will-change: transform;
+  animation: atmoSweep 30s ease-in-out infinite;
+}
+
+/* 柔光漂移：对角来回平移（等效原 background-position 0→200% 的扫动，去程+回程无缝）。
+ * 不旋转，避免风车感；幅度 -75% 让光晕明显横扫过画面。 */
+@keyframes atmoSweep {
+  0%   { transform: translate(0%, 0%); }
+  50%  { transform: translate(-75%, -75%); }
+  100% { transform: translate(0%, 0%); }
+}
+
+/* ---- 渐变关闭（纯色模式）：隐藏流动层，恢复静态纯色底 ---- */
+html[data-aurora="off"] .aurora-bg,
+html[data-aurora="off"] .atmosphere::before {
+  display: none;
+}
+
+h1,
+h2,
+h3,
+h4 {
+  margin: 0;
+  font-weight: var(--fw-bold);
+  line-height: 1.25;
+}
+
+/* 标题一律负字距（技能基准 -0.02 ~ -0.04em）：字号越大，字距越要收紧，
+ * 否则大字号会显得松散、失焦。 */
+h1 {
+  font-family: var(--font-mono);
+  font-size: var(--text-md);
+  letter-spacing: -0.02em;
+}
+
+h2 {
+  font-size: var(--text-md);
+  letter-spacing: -0.02em;
+}
+
+h3 {
+  font-size: var(--text-base);
+}
+
+p {
+  margin: 0;
+}
+
+button,
+input,
+select,
+textarea {
+  font: inherit;
+  color: inherit;
+}
+
+code,
+kbd,
+pre,
+.mono {
+  font-family: var(--font-mono);
+  font-variant-numeric: tabular-nums;
+}
+
+/* ---- 等宽文本重置字距 ----
+ * body 给中文正文加的 0.02em 不能落到等宽文本上，否则数字与代码的列对齐会散。
+ * 用 :where() 把优先级压到 0：组件里自己写了字距的（-.03em / .08em 等）仍然生效。 */
+:where(
+  code, kbd, pre, .mono,
+  .brand__mark, .brand__sub, .stat__label, .stat__value,
+  .topbar__status, .api-item__path, .rule-index, .rule__cond,
+  .urlbar__method, .urlbar__text, .code, .trace__item,
+  .log__time, .log__api, .log__rule, .tag, .field__label,
+  .section-label, .group__name, .group__count,
+  .theme-switch__btn, .toast, .btn--icon
+) {
+  letter-spacing: normal;
+}
+
+a {
+  color: var(--color-accent);
+  text-decoration: none;
+}
+
+/* ---- 焦点：2px 描边 + 2px 偏移，键盘可见 ---- */
+:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+  border-radius: var(--radius-sm);
+}
+
+/* ---- 滚动条：细、暗、不抢视线 ---- */
+::-webkit-scrollbar {
+  width: 10px;
+  height: 10px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: var(--color-scrollbar);
+  border: 3px solid transparent;
+  background-clip: content-box;
+  border-radius: 999px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: var(--color-scrollbar-hover);
+  background-clip: content-box;
+}
+/* 主题切换时保留原生控件（滚动条 / 表单）的配色 */
+html {
+  accent-color: var(--color-accent);
+}
+
+/* ---- 氛围辅助辉光（atmo）：独立一层，见文件顶部 html[data-aurora="on"] .atmosphere::before ----
+ * 注意：曾一度把它「合并进 .aurora-bg 同一背景层」，结果主层变成一个几乎不动的中心色斑、
+ * 流动感全丢（用户否掉）。现已恢复为独立的第二层，同样用 transform 平移扫动（GPU 合成）。
+ * 两层都是 transform 动画，均走合成器线程，主线程零逐帧重绘。 */
+
+/* ---- 氛围层二：颗粒噪点（贴合暗色工业质感） ---- */
+.grain::after {
+  content: "";
+  position: fixed;
+  inset: 0;
+  pointer-events: none;
+  z-index: 1;
+  opacity: var(--grain-opacity);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='.85'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* ---- 让内容层浮在氛围之上 ----
+ * 氛围层：.aurora-bg(z-index:-1) / .atmosphere::before(z-index:1) / .grain::after(z-index:1)。
+ * 这里把「顶层内容块」显式抬到 z-index:2，确保它们永远在氛围层之上。
+ * ⚠️ 新增 body 顶层的静态块（无 position/z-index 的）时，务必一并加进本表，
+ * 否则它会被 fixed 的氛围层盖住（.readonly-banner / .notice 就是这么被漏掉的，2026-09-15）。 */
+.topbar,
+.layout,
+.drawer,
+.toast-host,
+.readonly-banner,
+.notice {
+  position: relative;
+  z-index: 2;
+}
+
+/* ---- 入场序列：纯 CSS 关键帧，不依赖 JS ----
+ * 只用动画、不用"初始 opacity:0 + 等 JS 加类"的写法：
+ * 万一脚本加载失败，页面依然是完整可见的，不会漆黑一片。
+ * 只给顶栏和三栏这些静态骨架用；列表/卡片是动态重渲染的，不加动画避免闪烁。 */
+@keyframes rise-in {
+  from { opacity: 0; transform: translateY(12px); }
+  to { opacity: 1; transform: none; }
+}
+.reveal {
+  animation: rise-in var(--dur-base) var(--ease-out) both;
+}
+.reveal:nth-child(2) { animation-delay: 70ms; }
+.reveal:nth-child(3) { animation-delay: 140ms; }
+
+/* ---- 动效降级：系统偏好减弱动效时全部关闭 ---- */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+  }
+  .reveal {
+    opacity: 1;
+    transform: none;
+  }
+}
+
+/* ---- 无障碍：仅屏幕阅读器可见 ---- */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}

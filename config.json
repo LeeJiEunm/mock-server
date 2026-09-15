@@ -1,0 +1,1162 @@
+{
+  "server": {
+    "host": "0.0.0.0",
+    "port": 18080,
+    "readonlyPort": 0
+  },
+  "logSize": 200,
+  "groups": [
+    {
+      "id": "g-demo",
+      "name": "示例接口",
+      "proxyUrl": ""
+    },
+    {
+      "id": "gmtyvu5aq",
+      "name": "我的第一个分组",
+      "proxyUrl": ""
+    }
+  ],
+  "apis": [
+    {
+      "id": "demo-sample",
+      "name": "示例：条件响应",
+      "module": "demo",
+      "path": "sample",
+      "enabled": true,
+      "desc": "演示用。根据请求体字段 code 返回不同响应（500 / 404 / 默认成功），用于演示条件匹配与脚本响应。",
+      "proxy": {
+        "enable": false,
+        "url": ""
+      },
+      "vars": {
+        "errorMessage": "系统繁忙，请稍后重试",
+        "test": "1"
+      },
+      "rules": [
+        {
+          "id": "r1",
+          "name": "code=500 → 返回 500",
+          "enabled": true,
+          "match": "all",
+          "conditions": [
+            {
+              "source": "body",
+              "path": "code",
+              "op": "eq",
+              "value": "500"
+            }
+          ],
+          "response": {
+            "mode": "static",
+            "status": 500,
+            "delayMs": 0,
+            "delayMaxMs": 0,
+            "fault": "malformed",
+            "contentType": "application/json;charset=UTF-8",
+            "body": "{\"code\":500,\"message\":\"{{vars.errorMessage}}\"}",
+            "script": ""
+          },
+          "updatedBy": "",
+          "updatedAt": 1789250042799
+        },
+        {
+          "id": "r2",
+          "name": "code=404 → 返回 404",
+          "enabled": true,
+          "match": "all",
+          "conditions": [
+            {
+              "source": "body",
+              "path": "code",
+              "op": "eq",
+              "value": "404"
+            }
+          ],
+          "response": {
+            "mode": "static",
+            "status": 404,
+            "delayMs": 0,
+            "delayMaxMs": 0,
+            "fault": "none",
+            "contentType": "application/json;charset=UTF-8",
+            "body": "{\"code\":404,\"message\":\"资源不存在\"}",
+            "script": ""
+          }
+        },
+        {
+          "id": "r3",
+          "name": "URL 带 slow=1 → 延迟 3 秒",
+          "enabled": true,
+          "match": "all",
+          "conditions": [
+            {
+              "source": "query",
+              "path": "slow",
+              "op": "eq",
+              "value": "1"
+            }
+          ],
+          "response": {
+            "mode": "static",
+            "status": 200,
+            "delayMs": 3000,
+            "delayMaxMs": 3000,
+            "fault": "none",
+            "contentType": "application/json;charset=UTF-8",
+            "body": "{\"code\":0,\"message\":\"mock: 模拟慢响应\"}",
+            "script": ""
+          }
+        },
+        {
+          "id": "r4",
+          "name": "默认：成功响应并回显 code",
+          "enabled": true,
+          "match": "all",
+          "conditions": [],
+          "response": {
+            "mode": "script",
+            "status": 200,
+            "delayMs": 0,
+            "delayMaxMs": 0,
+            "fault": "none",
+            "contentType": "application/json;charset=UTF-8",
+            "body": "",
+            "script": "// ctx.body：请求体；ctx.vars：本接口配置变量\nconst code = ctx.body.code || 'default';\nreturn {\n  code: 0,\n  message: 'ok',\n  data: {\n    requestCode: code,\n    echo: ctx.body\n  }\n};"
+          }
+        }
+      ],
+      "defaultResponse": {
+        "mode": "static",
+        "status": 200,
+        "delayMs": 0,
+        "delayMaxMs": 0,
+        "fault": "none",
+        "contentType": "application/json;charset=UTF-8",
+        "body": "{\"code\":0,\"message\":\"mock: 未命中任何规则\"}",
+        "script": ""
+      },
+      "method": "POST",
+      "groupId": "",
+      "updatedBy": "",
+      "updatedAt": 1789256816083
+    },
+    {
+      "id": "demo-echo",
+      "name": "示例：回显请求",
+      "module": "demo",
+      "path": "echo",
+      "enabled": true,
+      "desc": "演示用。任何请求都回显入参，可按 header 里的 X-Mock-Case 定制返回。",
+      "proxy": {
+        "enable": false,
+        "url": ""
+      },
+      "vars": {},
+      "rules": [
+        {
+          "id": "r1",
+          "name": "X-Mock-Case=error → 400",
+          "enabled": true,
+          "match": "all",
+          "conditions": [
+            {
+              "source": "header",
+              "path": "x-mock-case",
+              "op": "eq",
+              "value": "error"
+            }
+          ],
+          "response": {
+            "mode": "static",
+            "status": 400,
+            "delayMs": 0,
+            "delayMaxMs": 0,
+            "fault": "none",
+            "contentType": "application/json;charset=UTF-8",
+            "body": "{\"code\":400,\"msg\":\"mock：已按用例返回失败\"}",
+            "script": ""
+          }
+        },
+        {
+          "id": "r2",
+          "name": "其他：回显",
+          "enabled": true,
+          "match": "all",
+          "conditions": [],
+          "response": {
+            "mode": "static",
+            "status": 200,
+            "delayMs": 0,
+            "delayMaxMs": 0,
+            "fault": "none",
+            "contentType": "application/json;charset=UTF-8",
+            "body": "{\"code\":0,\"msg\":\"mock echo\",\"id\":\"{{body.id}}\",\"url\":\"{{header.host}}\"}",
+            "script": ""
+          }
+        }
+      ],
+      "defaultResponse": {
+        "mode": "static",
+        "status": 200,
+        "delayMs": 0,
+        "delayMaxMs": 0,
+        "fault": "none",
+        "contentType": "application/json;charset=UTF-8",
+        "body": "{\"code\":0,\"msg\":\"mock echo\"}",
+        "script": ""
+      },
+      "groupId": "g-demo",
+      "method": "POST",
+      "updatedBy": "",
+      "updatedAt": 1789360433311
+    },
+    {
+      "id": "api-mtyvu8wa",
+      "name": "我的第一个接口",
+      "module": "demo",
+      "path": "first/second/third",
+      "method": "POST",
+      "enabled": false,
+      "desc": "",
+      "proxy": {
+        "enable": false,
+        "url": ""
+      },
+      "rules": [],
+      "vars": {},
+      "defaultResponse": {
+        "mode": "static",
+        "status": 200,
+        "delayMs": 0,
+        "delayMaxMs": 0,
+        "fault": "none",
+        "contentType": "application/json;charset=UTF-8",
+        "body": "{}",
+        "script": ""
+      },
+      "groupId": "gmtyvu5aq",
+      "updatedBy": "",
+      "updatedAt": 1789375110462
+    }
+  ],
+  "meta": {
+    "contactEmail": "maintainer@example.com",
+    "contactLabel": "维护者",
+    "repoUrl": "https://github.com/LeeJiEunm/mock-server",
+    "repoLabel": "mock-server"
+  },
+  "users": [],
+  "changelog": [
+    {
+      "id": 62,
+      "ts": 1789443775194,
+      "by": "",
+      "apiId": "api-mu01f04gmmlv",
+      "apiName": "示例：回显请求（副本）（副本）",
+      "action": "api.remove",
+      "detail": "删除接口（连带 2 条规则）"
+    },
+    {
+      "id": 61,
+      "ts": 1789443771273,
+      "by": "",
+      "apiId": "api-mu01exzuxu8e",
+      "apiName": "示例：回显请求（副本）（副本）",
+      "action": "api.remove",
+      "detail": "删除接口（连带 2 条规则）"
+    },
+    {
+      "id": 60,
+      "ts": 1789443767533,
+      "by": "",
+      "apiId": "api-mu01evnmduzk",
+      "apiName": "示例：回显请求（副本）（副本）",
+      "action": "api.remove",
+      "detail": "删除接口（连带 2 条规则）"
+    },
+    {
+      "id": 59,
+      "ts": 1789443763792,
+      "by": "",
+      "apiId": "api-mu01ersr29sz",
+      "apiName": "示例：回显请求（副本）（副本）",
+      "action": "api.remove",
+      "detail": "删除接口（连带 2 条规则）"
+    },
+    {
+      "id": 58,
+      "ts": 1789443759675,
+      "by": "",
+      "apiId": "api-mu01elwt3a9i",
+      "apiName": "示例：回显请求（副本）",
+      "action": "api.remove",
+      "detail": "删除接口（连带 2 条规则）"
+    },
+    {
+      "id": 57,
+      "ts": 1789443754860,
+      "by": "",
+      "apiId": "api-mtzxf5ux6vj0",
+      "apiName": "示例：回显请求（副本）",
+      "action": "api.remove",
+      "detail": "删除接口（连带 2 条规则）"
+    },
+    {
+      "id": 56,
+      "ts": 1789443751017,
+      "by": "",
+      "apiId": "api-mu17g39qxbbb",
+      "apiName": "示例：条件响应（副本）",
+      "action": "api.remove",
+      "detail": "删除接口（连带 4 条规则）"
+    },
+    {
+      "id": 55,
+      "ts": 1789443746793,
+      "by": "",
+      "apiId": "api-mu17h5c3r0es",
+      "apiName": "示例：条件响应（副本）（副本）",
+      "action": "api.remove",
+      "detail": "删除接口（连带 4 条规则）"
+    },
+    {
+      "id": 54,
+      "ts": 1789443741467,
+      "by": "",
+      "apiId": "api-mu17genqxtnr",
+      "apiName": "示例：条件响应（副本）",
+      "action": "api.remove",
+      "detail": "删除接口（连带 4 条规则）"
+    },
+    {
+      "id": 53,
+      "ts": 1789443736136,
+      "by": "",
+      "apiId": "api-mu17s2386hlp",
+      "apiName": "我的第一个接口（副本）（副本）",
+      "action": "api.remove",
+      "detail": "删除接口（连带 0 条规则）"
+    },
+    {
+      "id": 52,
+      "ts": 1789443732236,
+      "by": "",
+      "apiId": "api-mu17s2ijq5px",
+      "apiName": "我的第一个接口（副本）（副本）",
+      "action": "api.remove",
+      "detail": "删除接口（连带 0 条规则）"
+    },
+    {
+      "id": 51,
+      "ts": 1789443729216,
+      "by": "",
+      "apiId": "api-mu17rxttc9v4",
+      "apiName": "我的第一个接口（副本）",
+      "action": "api.remove",
+      "detail": "删除接口（连带 0 条规则）"
+    },
+    {
+      "id": 50,
+      "ts": 1789443724600,
+      "by": "",
+      "apiId": "api-mu17rylt17tl",
+      "apiName": "我的第一个接口（副本）",
+      "action": "api.remove",
+      "detail": "删除接口（连带 0 条规则）"
+    },
+    {
+      "id": 49,
+      "ts": 1789443635809,
+      "by": "",
+      "apiId": "api-mu01f04gmmlv",
+      "apiName": "示例：回显请求（副本）（副本）",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 48,
+      "ts": 1789443635809,
+      "by": "",
+      "apiId": "api-mu01exzuxu8e",
+      "apiName": "示例：回显请求（副本）（副本）",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 47,
+      "ts": 1789443635809,
+      "by": "",
+      "apiId": "api-mu01evnmduzk",
+      "apiName": "示例：回显请求（副本）（副本）",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 46,
+      "ts": 1789443635809,
+      "by": "",
+      "apiId": "api-mu01ersr29sz",
+      "apiName": "示例：回显请求（副本）（副本）",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 45,
+      "ts": 1789443635809,
+      "by": "",
+      "apiId": "api-mu01elwt3a9i",
+      "apiName": "示例：回显请求（副本）",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 44,
+      "ts": 1789443635809,
+      "by": "",
+      "apiId": "api-mtzxf5ux6vj0",
+      "apiName": "示例：回显请求（副本）",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 43,
+      "ts": 1789443635809,
+      "by": "",
+      "apiId": "api-mu17g39qxbbb",
+      "apiName": "示例：条件响应（副本）",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 42,
+      "ts": 1789443635809,
+      "by": "",
+      "apiId": "api-mu17h5c3r0es",
+      "apiName": "示例：条件响应（副本）（副本）",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 41,
+      "ts": 1789443635809,
+      "by": "",
+      "apiId": "api-mu17genqxtnr",
+      "apiName": "示例：条件响应（副本）",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 40,
+      "ts": 1789388613313,
+      "by": "",
+      "apiId": "api-mu17s2ijq5px",
+      "apiName": "我的第一个接口（副本）（副本）",
+      "action": "api.add",
+      "detail": "新增接口（含 0 条规则）"
+    },
+    {
+      "id": 39,
+      "ts": 1789388612759,
+      "by": "",
+      "apiId": "api-mu17s2386hlp",
+      "apiName": "我的第一个接口（副本）（副本）",
+      "action": "api.add",
+      "detail": "新增接口（含 0 条规则）"
+    },
+    {
+      "id": 38,
+      "ts": 1789388608245,
+      "by": "",
+      "apiId": "api-mu17rylt17tl",
+      "apiName": "我的第一个接口（副本）",
+      "action": "api.add",
+      "detail": "新增接口（含 0 条规则）"
+    },
+    {
+      "id": 37,
+      "ts": 1789388607237,
+      "by": "",
+      "apiId": "api-mu17rxttc9v4",
+      "apiName": "我的第一个接口（副本）",
+      "action": "api.add",
+      "detail": "新增接口（含 0 条规则）"
+    },
+    {
+      "id": 36,
+      "ts": 1789388166474,
+      "by": "",
+      "apiId": "api-mu01f1xzi6bm",
+      "apiName": "示例：回显请求（副本）（副本）",
+      "action": "api.remove",
+      "detail": "删除接口（连带 2 条规则）"
+    },
+    {
+      "id": 35,
+      "ts": 1789388103749,
+      "by": "",
+      "apiId": "api-mu17h5c3r0es",
+      "apiName": "示例：条件响应（副本）（副本）",
+      "action": "api.add",
+      "detail": "新增接口（含 4 条规则）"
+    },
+    {
+      "id": 34,
+      "ts": 1789388069176,
+      "by": "",
+      "apiId": "api-mu17genqxtnr",
+      "apiName": "示例：条件响应（副本）",
+      "action": "api.add",
+      "detail": "新增接口（含 4 条规则）"
+    },
+    {
+      "id": 33,
+      "ts": 1789388054423,
+      "by": "",
+      "apiId": "api-mu17g39qxbbb",
+      "apiName": "示例：条件响应（副本）",
+      "action": "api.add",
+      "detail": "新增接口（含 4 条规则）"
+    },
+    {
+      "id": 32,
+      "ts": 1789375110462,
+      "by": "",
+      "apiId": "api-mtyvu8wa",
+      "apiName": "我的第一个接口",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 31,
+      "ts": 1789375108060,
+      "by": "",
+      "apiId": "api-mtyvu8wa",
+      "apiName": "我的第一个接口",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 30,
+      "ts": 1789375106797,
+      "by": "",
+      "apiId": "api-mtyvu8wa",
+      "apiName": "我的第一个接口",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 29,
+      "ts": 1789375100670,
+      "by": "",
+      "apiId": "demo-echo",
+      "apiName": "示例：回显请求",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 28,
+      "ts": 1789375099519,
+      "by": "",
+      "apiId": "demo-echo",
+      "apiName": "示例：回显请求",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 22,
+      "ts": 1789360433311,
+      "by": "",
+      "apiId": "demo-echo",
+      "apiName": "示例：回显请求",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 21,
+      "ts": 1789360430019,
+      "by": "",
+      "apiId": "demo-echo",
+      "apiName": "示例：回显请求",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 20,
+      "ts": 1789360325327,
+      "by": "",
+      "apiId": "demo-echo",
+      "apiName": "示例：回显请求",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 19,
+      "ts": 1789360324735,
+      "by": "",
+      "apiId": "demo-echo",
+      "apiName": "示例：回显请求",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 18,
+      "ts": 1789360323910,
+      "by": "",
+      "apiId": "demo-echo",
+      "apiName": "示例：回显请求",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 17,
+      "ts": 1789360312286,
+      "by": "",
+      "apiId": "demo-echo",
+      "apiName": "示例：回显请求",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 16,
+      "ts": 1789360311254,
+      "by": "",
+      "apiId": "demo-echo",
+      "apiName": "示例：回显请求",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 15,
+      "ts": 1789360308694,
+      "by": "",
+      "apiId": "demo-echo",
+      "apiName": "示例：回显请求",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 14,
+      "ts": 1789360281646,
+      "by": "",
+      "apiId": "demo-echo",
+      "apiName": "示例：回显请求",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 13,
+      "ts": 1789360269303,
+      "by": "",
+      "apiId": "demo-echo",
+      "apiName": "示例：回显请求",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 12,
+      "ts": 1789360252173,
+      "by": "",
+      "apiId": "demo-echo",
+      "apiName": "示例：回显请求",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 11,
+      "ts": 1789360248446,
+      "by": "",
+      "apiId": "demo-echo",
+      "apiName": "示例：回显请求",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 10,
+      "ts": 1789360246854,
+      "by": "",
+      "apiId": "demo-echo",
+      "apiName": "示例：回显请求",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 9,
+      "ts": 1789359997277,
+      "by": "",
+      "apiId": "demo-echo",
+      "apiName": "示例：回显请求",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 8,
+      "ts": 1789359992838,
+      "by": "",
+      "apiId": "demo-echo",
+      "apiName": "示例：回显请求",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 7,
+      "ts": 1789359987582,
+      "by": "",
+      "apiId": "demo-echo",
+      "apiName": "示例：回显请求",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 6,
+      "ts": 1789359986748,
+      "by": "",
+      "apiId": "demo-echo",
+      "apiName": "示例：回显请求",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 5,
+      "ts": 1789359978886,
+      "by": "",
+      "apiId": "demo-echo",
+      "apiName": "示例：回显请求",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 4,
+      "ts": 1789359974680,
+      "by": "",
+      "apiId": "demo-echo",
+      "apiName": "示例：回显请求",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 3,
+      "ts": 1789359973510,
+      "by": "",
+      "apiId": "demo-echo",
+      "apiName": "示例：回显请求",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 2,
+      "ts": 1789359971782,
+      "by": "",
+      "apiId": "demo-echo",
+      "apiName": "示例：回显请求",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 1,
+      "ts": 1789359969622,
+      "by": "",
+      "apiId": "demo-echo",
+      "apiName": "示例：回显请求",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 8,
+      "ts": 1789354820135,
+      "by": "",
+      "apiId": "api-mu01f1xzi6bm",
+      "apiName": "示例：回显请求（副本）（副本）",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 7,
+      "ts": 1789354813901,
+      "by": "",
+      "apiId": "api-mu01f04gmmlv",
+      "apiName": "示例：回显请求（副本）（副本）",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 6,
+      "ts": 1789354809124,
+      "by": "",
+      "apiId": "api-mu01exzuxu8e",
+      "apiName": "示例：回显请求（副本）（副本）",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 5,
+      "ts": 1789354801884,
+      "by": "",
+      "apiId": "api-mu01evnmduzk",
+      "apiName": "示例：回显请求（副本）（副本）",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 4,
+      "ts": 1789354795241,
+      "by": "",
+      "apiId": "api-mu01ersr29sz",
+      "apiName": "示例：回显请求（副本）（副本）",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 3,
+      "ts": 1789354788615,
+      "by": "",
+      "apiId": "api-mu01elwt3a9i",
+      "apiName": "示例：回显请求（副本）",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 6,
+      "ts": 1789317462170,
+      "by": "",
+      "apiId": "api-mu01f1xzi6bm",
+      "apiName": "示例：回显请求（副本）（副本）",
+      "action": "api.add",
+      "detail": "新增接口（含 2 条规则）"
+    },
+    {
+      "id": 5,
+      "ts": 1789317459811,
+      "by": "",
+      "apiId": "api-mu01f04gmmlv",
+      "apiName": "示例：回显请求（副本）（副本）",
+      "action": "api.add",
+      "detail": "新增接口（含 2 条规则）"
+    },
+    {
+      "id": 4,
+      "ts": 1789317457053,
+      "by": "",
+      "apiId": "api-mu01exzuxu8e",
+      "apiName": "示例：回显请求（副本）（副本）",
+      "action": "api.add",
+      "detail": "新增接口（含 2 条规则）"
+    },
+    {
+      "id": 3,
+      "ts": 1789317454020,
+      "by": "",
+      "apiId": "api-mu01evnmduzk",
+      "apiName": "示例：回显请求（副本）（副本）",
+      "action": "api.add",
+      "detail": "新增接口（含 2 条规则）"
+    },
+    {
+      "id": 2,
+      "ts": 1789317449022,
+      "by": "",
+      "apiId": "api-mu01ersr29sz",
+      "apiName": "示例：回显请求（副本）（副本）",
+      "action": "api.add",
+      "detail": "新增接口（含 2 条规则）"
+    },
+    {
+      "id": 1,
+      "ts": 1789317441394,
+      "by": "",
+      "apiId": "api-mu01elwt3a9i",
+      "apiName": "示例：回显请求（副本）",
+      "action": "api.add",
+      "detail": "新增接口（含 2 条规则）"
+    },
+    {
+      "id": 17,
+      "ts": 1789310757117,
+      "by": "admin",
+      "apiId": "api-mtzxf5ux6vj0",
+      "apiName": "示例：回显请求（副本）",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 16,
+      "ts": 1789310748780,
+      "by": "admin",
+      "apiId": "api-mtzxf5ux6vj0",
+      "apiName": "示例：回显请求（副本）",
+      "action": "api.add",
+      "detail": "新增接口（含 2 条规则）"
+    },
+    {
+      "id": 291,
+      "ts": 1789256816083,
+      "by": "",
+      "apiId": "demo-sample",
+      "apiName": "示例：条件响应",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 290,
+      "ts": 1789256813649,
+      "by": "",
+      "apiId": "demo-sample",
+      "apiName": "示例：条件响应",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 289,
+      "ts": 1789256812115,
+      "by": "",
+      "apiId": "demo-sample",
+      "apiName": "示例：条件响应",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 288,
+      "ts": 1789256810568,
+      "by": "",
+      "apiId": "demo-sample",
+      "apiName": "示例：条件响应",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 281,
+      "ts": 1789250042799,
+      "by": "",
+      "apiId": "demo-sample",
+      "apiName": "示例：条件响应",
+      "action": "rule.update",
+      "detail": "修改规则「code=500 → 返回 500」：名称"
+    },
+    {
+      "id": 280,
+      "ts": 1789250015219,
+      "by": "",
+      "apiId": "demo-sample",
+      "apiName": "示例：条件响应",
+      "action": "rule.update",
+      "detail": "修改规则「code=500 → 返回 5001」：名称"
+    },
+    {
+      "id": 267,
+      "ts": 1789247662661,
+      "by": "",
+      "apiId": "api-mtyvu8wa",
+      "apiName": "我的第一个接口",
+      "action": "api.add",
+      "detail": "新增接口（含 0 条规则）"
+    },
+    {
+      "id": 266,
+      "ts": 1789247463261,
+      "by": "",
+      "apiId": "demo-sample",
+      "apiName": "示例：条件响应",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 265,
+      "ts": 1789247459144,
+      "by": "",
+      "apiId": "demo-sample",
+      "apiName": "示例：条件响应",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 264,
+      "ts": 1789247457661,
+      "by": "",
+      "apiId": "demo-sample",
+      "apiName": "示例：条件响应",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 263,
+      "ts": 1789247455947,
+      "by": "",
+      "apiId": "demo-sample",
+      "apiName": "示例：条件响应",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 241,
+      "ts": 1789244004781,
+      "by": "",
+      "apiId": "demo-echo",
+      "apiName": "示例：回显请求",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 240,
+      "ts": 1789244003414,
+      "by": "",
+      "apiId": "demo-echo",
+      "apiName": "示例：回显请求",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 137,
+      "ts": 1789236169667,
+      "by": "",
+      "apiId": "demo-sample",
+      "apiName": "示例：条件响应",
+      "action": "rule.update",
+      "detail": "修改规则「code=500 → 返回 500」：启用"
+    },
+    {
+      "id": 134,
+      "ts": 1789236164014,
+      "by": "",
+      "apiId": "demo-sample",
+      "apiName": "示例：条件响应",
+      "action": "rule.update",
+      "detail": "修改规则「code=500 → 返回 500」：停用 / 响应"
+    },
+    {
+      "id": 72,
+      "ts": 1789219801781,
+      "by": "",
+      "apiId": "demo-sample",
+      "apiName": "示例：条件响应",
+      "action": "rule.update",
+      "detail": "修改规则「code=500 → 返回 500」：响应"
+    },
+    {
+      "id": 45,
+      "ts": 1789217242791,
+      "by": "",
+      "apiId": "demo-sample",
+      "apiName": "示例：条件响应",
+      "action": "rule.update",
+      "detail": "修改规则「code=500 → 返回 500」：响应"
+    },
+    {
+      "id": 42,
+      "ts": 1789217161420,
+      "by": "",
+      "apiId": "demo-sample",
+      "apiName": "示例：条件响应",
+      "action": "rule.update",
+      "detail": "修改规则「code=500 → 返回 500」：响应"
+    },
+    {
+      "id": 33,
+      "ts": 1789215737999,
+      "by": "",
+      "apiId": "demo-sample",
+      "apiName": "示例：条件响应",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 31,
+      "ts": 1789215641453,
+      "by": "",
+      "apiId": "demo-sample",
+      "apiName": "示例：条件响应",
+      "action": "rule.update",
+      "detail": "修改规则「code=500 → 返回 500」：响应"
+    },
+    {
+      "id": 41,
+      "ts": 1789207951543,
+      "by": "",
+      "apiId": "api-mty86yx35fnj",
+      "apiName": "示例：回显请求（副本）",
+      "action": "api.remove",
+      "detail": "删除接口（连带 2 条规则）"
+    },
+    {
+      "id": 39,
+      "ts": 1789207914612,
+      "by": "",
+      "apiId": "api-mty86yx35fnj",
+      "apiName": "示例：回显请求（副本）",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 38,
+      "ts": 1789207909965,
+      "by": "",
+      "apiId": "api-mty86yx35fnj",
+      "apiName": "示例：回显请求（副本）",
+      "action": "api.add",
+      "detail": "新增接口（含 2 条规则）"
+    },
+    {
+      "id": 37,
+      "ts": 1789207891345,
+      "by": "",
+      "apiId": "api-mty85vafvu3v",
+      "apiName": "示例：回显请求（副本）",
+      "action": "api.remove",
+      "detail": "删除接口（连带 2 条规则）"
+    },
+    {
+      "id": 36,
+      "ts": 1789207869202,
+      "by": "",
+      "apiId": "api-mty85vafvu3v",
+      "apiName": "示例：回显请求（副本）",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 35,
+      "ts": 1789207858602,
+      "by": "",
+      "apiId": "api-mty85vafvu3v",
+      "apiName": "示例：回显请求（副本）",
+      "action": "api.add",
+      "detail": "新增接口（含 2 条规则）"
+    },
+    {
+      "id": 29,
+      "ts": 1789207532098,
+      "by": "",
+      "apiId": "demo-sample",
+      "apiName": "示例：条件响应",
+      "action": "rule.update",
+      "detail": "修改规则「code=500 → 返回 500」：响应"
+    },
+    {
+      "id": 28,
+      "ts": 1789207505701,
+      "by": "",
+      "apiId": "demo-sample",
+      "apiName": "示例：条件响应",
+      "action": "rule.update",
+      "detail": "修改规则「code=500 → 返回 500」：响应"
+    },
+    {
+      "id": 27,
+      "ts": 1789207099505,
+      "by": "",
+      "apiId": "demo-sample",
+      "apiName": "示例：条件响应",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    },
+    {
+      "id": 26,
+      "ts": 1789207070146,
+      "by": "",
+      "apiId": "demo-sample",
+      "apiName": "示例：条件响应",
+      "action": "api.update",
+      "detail": "修改接口设置"
+    }
+  ],
+  "shareTokens": []
+}

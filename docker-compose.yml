@@ -1,0 +1,26 @@
+services:
+  mock-server:
+    build: .
+    image: mock-server:1.0.0
+    container_name: mock-server
+    restart: unless-stopped
+    ports:
+      # 冒号左边是宿主机端口，可用环境变量覆盖，不必改文件：
+      #   MOCK_PORT=18081 docker compose up -d
+      - "${MOCK_PORT:-18080}:18080"
+      # 只读分享端口：容器内只读端口必须是 18081（与容器内主端口 18080 不同），
+      # 宿主机暴露哪个端口自定。推荐用 deploy.sh 生成叠加文件，不要手改这里：
+      #   ./deploy.sh <user>@<host> -m docker -r <宿主机只读端口>     # 例：-r 18081
+      # 手改的话：取消下面这行注释、把 MOCK_RO_PORT 的默认值换成你要的宿主机端口，
+      # 并给服务加一行 environment: READONLY_PORT=18081
+      # - "${MOCK_RO_PORT:-18081}:18081"
+    environment:
+      # 容器内固定 18080，对外端口靠上面的映射决定
+      - PORT=18080
+      # 控制台登录用户名 / 密码（密码为空=不启用登录）；建议用环境变量注入，不要写进文件
+      - MOCK_ADMIN_USER=${MOCK_ADMIN_USER:-admin}
+      - MOCK_ADMIN_PASS=${MOCK_ADMIN_PASS:-}
+    volumes:
+      # 配置挂到宿主机：界面里改的规则才能落到宿主机文件、容器重建也不丢
+      # 注意：宿主机必须先有这个文件，否则 docker 会把目录挂进来
+      - ./config.json:/app/config.json

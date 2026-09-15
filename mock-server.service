@@ -1,0 +1,45 @@
+# ============================================================================
+# 手工部署参考模板
+#
+# 用 ./deploy.sh 部署 **不需要** 这个文件 —— 脚本会按探测到的实际路径自动生成
+# systemd 单元（node 绝对路径、安装目录、端口都是从环境里取的，不写死）。
+#
+# 这个文件只留给「想手工装 systemd」的场景：把下面 4 个占位符换成实际值，
+# 存成 /etc/systemd/system/mock-server.service，然后执行：
+#     systemctl daemon-reload
+#     systemctl enable --now mock-server
+#
+# 占位符对照：
+#   {{NODE_BIN}}    node 的绝对路径    用 `command -v node` 查（如 /usr/bin/node）
+#   {{REMOTE_DIR}}  安装目录           如 /opt/mock-server
+#   {{PORT}}        监听端口           如 18080
+#   {{RUN_USER}}    运行用户           如 root
+# ============================================================================
+[Unit]
+Description=Mock Server - 带界面的动态挡板服务
+Documentation=file:{{REMOTE_DIR}}/README.md
+After=network.target
+# 启动连续失败 5 次就停下，避免配置写错时无限重启刷日志
+StartLimitIntervalSec=60
+StartLimitBurst=5
+
+[Service]
+Type=simple
+WorkingDirectory={{REMOTE_DIR}}
+# 端口走环境变量，server.js 的取值顺序是 PORT > config.json 的 server.port > 18080
+Environment=PORT={{PORT}}
+# 控制台登录（可选）：要让面板需要登录，把下面两行取消注释并改成自己的账号密码；
+# 不填 MOCK_ADMIN_USER 时用户名默认 admin。也可以用 config.json 的 users 配多个账号。
+# Environment=MOCK_ADMIN_USER=admin
+# Environment=MOCK_ADMIN_PASS=changeme
+# 只读隔离端口（可选，推荐给免密部署）：分享链接专用的独立端口，
+# 访问者去掉 URL 上的 ?share= 也只读；必须和上面的 PORT 不同。
+# 不配它的话，免密部署下「生成分享链接」会被拒绝（403，避免分享出可编辑的主端口）。
+# Environment=READONLY_PORT=18081
+ExecStart={{NODE_BIN}} {{REMOTE_DIR}}/server.js
+Restart=always
+RestartSec=3
+User={{RUN_USER}}
+
+[Install]
+WantedBy=multi-user.target

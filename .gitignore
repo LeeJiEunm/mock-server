@@ -1,0 +1,53 @@
+# ============================================================================
+# mock-server —— 忽略规则（若直接把本目录作为仓库根目录，这份规则就够用）
+#
+# 设计原则：
+#   - config.json **故意入库**（仓库里这份是示例数据）。理由：server.js 启动即
+#     loadConfig()（无 try/catch）、Dockerfile 有 COPY config.json、compose 挂载它，
+#     缺了它 clone 之后跑不起来。
+#   - 要忽略的是「本机运行时产生的衍生文件」：日志、备份、临时文件、本地数据。
+#   - 一旦往 config.json 填了真实业务规则或 users（含密码哈希），请把它降级为
+#     config.example.json 并让真实配置退出跟踪（步骤见仓库根 .gitignore 文末）。
+# ============================================================================
+
+# ---------- 操作系统 / 编辑器 ----------
+.DS_Store
+.AppleDouble
+.LSOverride
+._*
+Thumbs.db
+desktop.ini
+.idea/
+*.iml
+.vscode/
+*.swp
+*.swo
+*~
+
+# ---------- 依赖与运行时产物 ----------
+node_modules/
+npm-debug.log*
+yarn-error.log*
+*.pid
+*.seed
+
+# ---------- 日志（含本机内网地址，不入库）----------
+*.log
+logs/
+
+# ---------- 配置衍生品 ----------
+# 原子写临时文件：正常会被 rename 掉，进程崩溃时可能残留
+config.json.tmp
+*.tmp
+# 本机备份：手工备份 / 重启前自动备份 / 本地覆盖
+config.json.bak
+config.json.before-restart
+config.json.local
+
+# ---------- 环境变量（放密钥，永不提交）----------
+.env
+.env.local
+.env.*.local
+
+# ---------- 本地演示 / 沙盘产物 ----------
+docker-compose.readonly.yml
