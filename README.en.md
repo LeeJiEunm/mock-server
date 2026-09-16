@@ -6,20 +6,44 @@ One configuration can host interfaces for multiple upstream services; **a single
 
 Zero dependencies (Node built-in modules only), single process, change rules without restarting.
 
-> **Repository**: <https://github.com/LeeJiEunm/mock-server> ｜ **Author**: LeeJiEunm ｜ **Issues**: <https://github.com/LeeJiEunm/mock-server/issues>
->
-> Clone and run (Node ≥ 16, no `npm install` needed):
->
-> ```bash
-> git clone https://github.com/LeeJiEunm/mock-server.git
-> cd mock-server && node server.js     # console at http://127.0.0.1:18080/
-> ```
+![Console overview](docs/shot-console.png)
+
+<p align="center"><sub>Console overview: left (interface list) · middle (rule editor + try-once) · right (live request logs) ｜ <a href="docs/shot-share.png">share-link dialog</a> ｜ <a href="docs/shot-help.png">web manual</a></sub></p>
 
 ---
 
-## 1. Background
+## Quick start <!-- sec:quickstart -->
 
-This service is a **zero-dependency Node mock / stub** used to **replace real upstream interfaces during integration / testing**.
+**Local (dev self-test)** — no `npm install`, Node ≥ 16:
+
+```bash
+git clone https://github.com/LeeJiEunm/mock-server.git
+cd mock-server && node server.js     # console at http://127.0.0.1:18080/
+```
+
+**Server deploy (long-running for testers / project staff)** — one-click script auto-detects node, generates the systemd unit, and enables boot-start:
+
+```bash
+./deploy.sh <user>@<HOST_IP>          # default /opt/mock-server + port 18080
+```
+
+> Repository: <https://github.com/LeeJiEunm/mock-server> ｜ Author: LeeJiEunm ｜ Issues: <https://github.com/LeeJiEunm/mock-server/issues>
+
+---
+
+**Doc index**
+
+| Doc | Reader |
+| --- | --- |
+| [docs/操作手册.md](docs/操作手册.md) | Testers / integration colleagues: task-oriented quick reference (deploy modes, share links, user mgmt, FAQ) |
+| Console top-bar ❓ icon ([`public/help.html`](public/help.html)) | Everyone: web illustrated guide, also visible in read-only share view |
+| This README | Deployers / maintainers: full rule syntax, deploy forms, admin API |
+
+---
+
+## 1. Background <!-- sec:background -->
+
+This service is a **zero-dependency Node mock**, used to **replace real upstream interfaces during integration / testing**.
 
 Its role is a generic, configurable interface simulator:
 
@@ -27,13 +51,13 @@ Its role is a generic, configurable interface simulator:
 - can simulate **service errors (500), timeouts (delay), business failures (custom status)** to cover positive and negative cases;
 - with the "try-once" feature, you can verify rule matching without touching the real upstream.
 
-The mock capability is generic (match by module + interface path, rules configurable): it can replace a single upstream interface, or take over an entire chain. This repo ships a `demo` module as an example; other modules can be entered via the UI or imported from a legacy mock platform (see [Section 10](#10-import-from-a-legacy-mock-platform)).
+The mock capability is generic (match by module + interface path, rules configurable): it can replace a single upstream interface, or take over an entire chain. This repo ships a `demo` module as an example; other modules can be entered via the UI or imported from a legacy mock platform (see [Section 11](#11-import-from-a-legacy-mock-platform)).
 
 > ⚠️ For internal test networks only. Script mode executes JS directly — do not expose it to the public Internet.
 
 ---
 
-## 2. Features
+## 2. Features <!-- sec:features -->
 
 - **Zero dependencies**: Node built-in modules only (`crypto.randomUUID()`, etc.). No `npm install`; the whole directory is portable.
 - **Dynamic rules**: each interface = "multiple conditional rules + a fallback response", first match wins.
@@ -46,11 +70,26 @@ The mock capability is generic (match by module + interface path, rules configur
 
 ---
 
-## 3. Local Deployment (dev machine / integration)
+## 3. Before you start (constraints) <!-- sec:must-know -->
+
+These are the "you'll get burned without reading" items — skim them before deploying:
+
+1. **⚠️ Internal test networks only.** Script mode executes JS; keep it on the test network, not public.
+2. **⚠️ `config.json` is the single source of truth.** UI edits write back to the file immediately; editing the file directly requires "reload config" in the UI. Top level is `groups` + `apis`: `apis[].groupId` points to `groups[].id`; empty or deleted group → "ungrouped". Groups affect UI only, not routing.
+3. **⚠️ Rules are first-match-wins.** A broad rule on top eats everything below.
+4. **⚠️ Response shape must match the real interface.** The client has hard requirements on fields; missing fields cause NPE. When designing mock responses, always mirror the real interface's fields and types — required fields present, types consistent.
+5. Mock paths must not start with `/_admin` (reserved for the admin API).
+6. **Static assets only match root / `styles/` / `scripts/` / files with extensions like `.css .js .json .ico .png .svg`**; everything else is treated as a mock interface. So mock interface paths **must not carry static suffixes** (`/demo/query.json` would be treated as a static file).
+7. Logs are in memory, cleared on restart, default 200 entries (`config.json` `logSize`).
+8. Browser auto-requests `favicon.ico`, `/.well-known/*` **are not logged**; only real business calls appear.
+
+---
+
+## 4. Local Deployment (dev machine / integration) <!-- sec:local-deploy -->
 
 Local deployment just runs the service on your own machine (macOS or Windows), opens the console in a browser to configure rules, and points the system-under-test's upstream address to this machine. No `npm install` needed.
 
-### 3.1 macOS
+### 4.1 macOS <!-- sec:local-mac -->
 
 ```bash
 # 1) Ensure Node is present (>= 16 recommended)
@@ -68,7 +107,7 @@ After start:
 
 > On macOS the upstream address is often `http://127.0.0.1:18080/demo`; do not end the URL with `/`.
 
-### 3.2 Windows
+### 4.2 Windows <!-- sec:local-win -->
 
 On Windows install Node first, then start from PowerShell or CMD:
 
@@ -92,12 +131,19 @@ On Windows install Node first, then start from PowerShell or CMD:
 
 > If the system-under-test and the mock are on different machines, replace `127.0.0.1` with the mock machine's **LAN IP** (e.g. `http://192.168.x.x:18080/demo`), and ensure the firewall allows port 18080.
 
-### 3.3 Common local operations
+### 4.3 Common local operations <!-- sec:local-common -->
 
 ```bash
 # Change port (PORT env > config.json server.port > default 18080)
 PORT=18081 node server.js
+
+# Passwordless + read-only share port (reproduce the "share link on a separate port" deploy form locally)
+READONLY_PORT=18081 node server.js     # share link points to http://<host>:18081/?share=... (still read-only without ?share=)
 ```
+
+> `READONLY_PORT` only rewrites the share link's host port under **passwordless deploy** (under account/password deploy the link stays on the main port, protected by login); it must differ from the main port. Passwordless without it → clicking "generate share link" in the UI returns 403.
+>
+> After editing `deploy.sh` you can run `tools/verify-deploy.sh` for a local self-check (fake-ssh sandbox, no real server needed).
 
 **Console login protection** (guards the web admin UI only; calling mock APIs directly such as `/demo/...` is completely unaffected).
 
@@ -109,9 +155,9 @@ MOCK_ADMIN_USER=zhangsan MOCK_ADMIN_PASS=secret node server.js
 
 - If `MOCK_ADMIN_USER` is omitted the username defaults to `admin`, i.e. `MOCK_ADMIN_PASS=secret node server.js` → log in with `admin / secret`.
 - Neither set = no login protection; the console is open to anyone.
-- The startup banner tells you which credentials are live, so you never have to guess:
+- The startup banner tells you which credentials are live, so you never have to guess (text follows the deployed default language):
   ```
-  控制台登录 : 已启用（账号 zhangsan，来源 MOCK_ADMIN_USER / MOCK_ADMIN_PASS）
+  Console login : enabled (account zhangsan, from MOCK_ADMIN_USER / MOCK_ADMIN_PASS)
   ```
 - Forgot the password? Change the env vars and restart; switching `MOCK_ADMIN_USER` invalidates the old account.
 
@@ -144,7 +190,7 @@ Changes are hot-reloaded; no restart required.
 
 Port resolution order: `PORT` env > `config.json` `server.port` > `18080`.
 
-### 3.4 Interface language (deploy-time default language)
+### 4.4 Interface language (deploy-time default language) <!-- sec:local-lang -->
 
 The console ships in **Chinese / English**, and the **login page also has a language switch** — at the bottom of the login card there are `中文 / English` buttons you can use before logging in; whichever you pick also changes the console copy after login.
 
@@ -159,14 +205,14 @@ MOCK_DEFAULT_LANG=en MOCK_ADMIN_PASS=secret node server.js
 - Priority: `MOCK_DEFAULT_LANG` env > `config.json` `defaultLang` field > unspecified (Chinese).
 - The startup banner prints the effective default language:
   ```
-  默认语言 : en（来源 MOCK_DEFAULT_LANG）
+  Default language : en (from MOCK_DEFAULT_LANG)
   ```
 - **Relationship between "deploy default" and "user's explicit choice"** (important): the deploy default only applies when the user has not yet clicked the language switch, and it is **not persisted** to the browser. So changing `MOCK_DEFAULT_LANG` and restarting instantly flips every user who hasn't manually chosen a language; but once a user clicks `中文 / English`, that choice is remembered (in `localStorage`) and no longer overridden by the deploy default — until they clear browser storage. This gives you a uniform initial language without freezing user preference into the deploy config.
 - The top-bar 🌐 button switches language both before and after login; the login-page and console language selections stay in sync.
 
 ---
 
-## 4. Server Deployment (test machine / long-running integration)
+## 5. Server Deployment (test machine / long-running integration) <!-- sec:server-deploy -->
 
 Server deployment targets an always-on test machine (Linux, typically CentOS 7 / Ubuntu). Three options:
 
@@ -174,7 +220,7 @@ Server deployment targets an always-on test machine (Linux, typically CentOS 7 /
 - **systemd manual**: for when you want to control the service file yourself.
 - **Docker**: host does not need Node; Node runs inside the container.
 
-### 4.1 Prerequisites
+### 5.1 Prerequisites <!-- sec:server-prereq -->
 
 | Item | Notes |
 | --- | --- |
@@ -200,7 +246,7 @@ SSH login (optional): the script already handles the password via SSH connection
 ssh-copy-id <user>@<HOST_IP>
 ```
 
-### 4.2 One-click deploy (deploy.sh)
+### 5.2 One-click deploy (deploy.sh) <!-- sec:server-onclick -->
 
 Run on **your machine** (where the package lives); the script ssh's to the target automatically:
 
@@ -214,6 +260,7 @@ Options:
 | Option | Meaning | Default |
 | --- | --- | --- |
 | `-p, --port` | Listen port | 18080 |
+| `-r, --readonly-port` | Read-only isolation port (for share links; **required for passwordless deploy**) | off |
 | `-d, --dir` | Remote install dir | /opt/mock-server |
 | `-m, --mode` | systemd / plain / docker | auto (systemd preferred) |
 | `-f, --force` | Also overwrite config.json (default keeps the remote one) | off |
@@ -222,12 +269,28 @@ Examples:
 
 ```bash
 ./deploy.sh root@<HOST_IP>                       # default /opt/mock-server + 18080
-./deploy.sh root@<HOST_IP> -p 18081              # change port
+./deploy.sh root@<HOST_IP> -p 9090               # change port
 ./deploy.sh root@<HOST_IP> -d /data/mock-server  # change install dir
+./deploy.sh root@<HOST_IP> -r 18081              # passwordless + read-only port 18081 (example port, change as needed)
 ./deploy.sh root@<HOST_IP> -m docker -p 7773     # container (host needs no node)
 ```
 
-Enable console login right at deploy time (optional, see 3.3; just **prefix the script with env vars**):
+**Recommended: passwordless deploy for testers (read-only port 18081)**
+
+```bash
+cd mock-server
+./deploy.sh root@<HOST_IP> -r 18081
+```
+
+- Not setting `MOCK_ADMIN_PASS` = passwordless: the main-port console is open to anyone and anyone can edit rules — fine for internal integration, **do not put it on the public Internet**.
+- With `-r 18081` the script automatically: writes `Environment=READONLY_PORT=18081` into the systemd unit (or the launch command in plain / docker mode), covers both ports in the occupancy check, and opens both `18080` and `18081` in the firewall.
+- On the read-only port `18081`: `/login` is disabled, any non-GET write returns 403, and without a valid `?share=` the page shows "valid share link required".
+- After generating a share link, the URL looks like `http://<HOST_IP>:18081/?share=shr-xxxx` — even if the other party strips `?share=`, it's still a read-only page and nothing can be changed.
+- Security boundary: this isolation **only protects the share link**. The `18080` main port is unprotected; tighten it with the firewall to your own / internal subnet, and open `18081` only to testers.
+
+> `-r` and `-p` cannot be equal (equal → server.js silently disables the read-only listener); the script errors out before deploy. A taken port also exits before deploy (including the read-only port), so you never end up with a "UI works but share link won't open" half-deploy.
+
+Enable console login right at deploy time (optional, see 4.3; just **prefix the script with env vars**):
 
 ```bash
 # explicit admin username + password
@@ -240,11 +303,11 @@ MOCK_ADMIN_PASS=secret ./deploy.sh root@<HOST_IP>
 node tools/add-user.js zhangsan secret
 ./deploy.sh root@<HOST_IP> -f
 
-# also set the deploy-time default language (en / zh-CN, see 3.4)
+# also set the deploy-time default language (en / zh-CN, see 4.4)
 MOCK_DEFAULT_LANG=en MOCK_ADMIN_PASS=secret ./deploy.sh root@<HOST_IP>
 ```
 
-The script writes these variables into the remote systemd unit (or the launch command in plain / docker mode) and prints `控制台登录 已开启，账号 zhangsan` when done; to change the account or password, just rerun `./deploy.sh` with new env vars. The remote config lives at `<install dir>/config.json`, and `tools/add-user.js` + `tools/gen-pass.js` are uploaded too, so you can also run `node tools/add-user.js <user> <pass>` on the server.
+The script writes these variables into the remote systemd unit (or the launch command in plain / docker mode) and prints `Console login enabled, account zhangsan` when done; to change the account or password, just rerun `./deploy.sh` with new env vars. The remote config lives at `<install dir>/config.json`, and `tools/add-user.js` + `tools/gen-pass.js` are uploaded too, so you can also run `node tools/add-user.js <user> <pass>` on the server.
 
 > With login enabled, `/_admin/health` returns **401** when not logged in — that's expected (service is up, the console just needs a login). The script's health check accepts either 200 or 401.
 
@@ -260,9 +323,38 @@ The 7 automatic steps:
 | 6 | Health | Hit `/_admin/health`; **200 or 401 both count as ready** (401 = login protection on); print diagnostics on failure |
 | 7 | Firewall | Open port if firewalld is active, else skip |
 
-> The node absolute path is **probed** (`command -v node`); install dir and port are CLI args; the port ends up in the systemd unit's `Environment=PORT=`. Nothing is hard-coded.
+> The node absolute path is **probed** (`command -v node`); install dir and port are CLI args; the port ends up in the systemd unit's `Environment=PORT=` (read-only port → `Environment=READONLY_PORT=`). Nothing is hard-coded.
 
-### 4.3 systemd manual
+**Set maintainer info after deploy (email + repo URL)**
+
+The console top-bar "Contact maintainer" (✉) and "GitHub" (repo icon) both read the `meta` field at the top of the remote `config.json` — **nothing is hardcoded in source**. The repo's email stays a placeholder; **set the real email only on the target machine** (so it doesn't get committed to git). The repo URL is public and ships with the real value.
+
+One command to set both email and repo URL (replace `<install dir>` and the email with your own):
+
+```bash
+ssh <user>@<HOST_IP> 'bash -s' <<'REMOTE'
+cd /opt/mock-server            # replace with your install dir
+node - <<'JS'
+const fs = require('fs');
+const p = 'config.json';
+const c = JSON.parse(fs.readFileSync(p, 'utf8'));
+c.meta = Object.assign({ contactLabel: 'Maintainer' }, c.meta, {
+  contactEmail: 'you@example.com',                          // your real contact email
+  repoUrl: 'https://github.com/LeeJiEunm/mock-server',      // URL the top-bar GitHub button opens
+  repoLabel: 'mock-server',
+});
+fs.writeFileSync(p, JSON.stringify(c, null, 2));
+console.log('meta =', c.meta);
+JS
+REMOTE
+```
+
+- Takes effect immediately (the service watches config changes); if not, click "reload config" in the UI.
+- `meta.repoUrl` only accepts `http(s)://` (config is externally editable — don't let `javascript:` reach `window.open`).
+- These values can only be set via `config.json` (the UI shows them but cannot edit them).
+- Rerunning `./deploy.sh` **does not overwrite the remote `config.json`** (kept by default), so what you set stays valid; only `-f` replaces it with the local copy.
+
+### 5.3 systemd manual <!-- sec:server-systemd -->
 
 Without the script, fill the 4 placeholders in `mock-server.service` and push it to the target:
 
@@ -276,12 +368,13 @@ ssh <user>@<HOST_IP> 'command -v node'
 
 # 3) Replace {{NODE_BIN}} {{REMOTE_DIR}} {{PORT}} {{RUN_USER}} in mock-server.service,
 #    save it to /etc/systemd/system/mock-server.service
+#    (to enable the read-only share port, add a line Environment=READONLY_PORT=18081 under [Service])
 
 # 4) Start
 ssh <user>@<HOST_IP> 'sudo systemctl daemon-reload && sudo systemctl enable --now mock-server'
 ```
 
-### 4.4 Docker
+### 5.4 Docker <!-- sec:server-docker -->
 
 Host only needs docker + compose; no Node required:
 
@@ -292,8 +385,9 @@ MOCK_PORT=18080 docker compose up -d --build
 
 - `MOCK_PORT` sets the host port (container-fixed 18080); `config.json` is volume-mounted to the host so rule edits persist.
 - Container `restart: unless-stopped`, auto-starts after host reboot.
+- **Don't hand-edit compose for the read-only port**: use `./deploy.sh <user>@<HOST_IP> -m docker -r <host readonly port>` — the script generates a `docker-compose.readonly.yml` overlay on the remote, maps `<host readonly port>` to **container port 18081**, injects `READONLY_PORT=18081` into the container, and starts with `-f docker-compose.yml -f docker-compose.readonly.yml`. The container read-only port must differ from the container main port (18080), so it's fixed at 18081 inside; which host port is exposed is decided by `-r`.
 
-### 4.5 Boot-start & operations
+### 5.5 Boot-start & operations <!-- sec:server-ops -->
 
 | Scenario | Command (on your machine, target `<user>@<HOST_IP>`) |
 | --- | --- |
@@ -302,7 +396,7 @@ MOCK_PORT=18080 docker compose up -d --build
 | Logs | `ssh <user>@<HOST_IP> 'journalctl -u mock-server -n 50 --no-pager'` |
 | Boot-enabled? | `ssh <user>@<HOST_IP> 'systemctl is-enabled mock-server'` |
 | Fetch config | `scp <user>@<HOST_IP>:/opt/mock-server/config.json ./config.json` |
-| Redeploy port | `./deploy.sh <user>@<HOST_IP> -p 18081` |
+| Redeploy port | `./deploy.sh root@<HOST_IP> -p 18081` |
 
 - Host reboot → service comes up automatically (enabled).
 - Process crash → `Restart=always` brings it back in 3s.
@@ -316,9 +410,31 @@ curl -s http://<HOST_IP>:18080/_admin/health
 # {"ok":true,"port":18080,"apis":2,"groups":1,"rules":6}
 ```
 
+### 5.6 Update an existing deploy (upgrade) <!-- sec:server-upgrade -->
+
+`deploy.sh` is **idempotent**: rerunning it on the same machine with the same args is an upgrade. Args (`-p` main port, `-d` install dir) must match the first deploy; add the read-only port as needed.
+
+```bash
+# 1) Rerun from your local repo dir (-p / -d must match first deploy, or you'll install a second service)
+cd mock-server
+./deploy.sh <user>@<HOST_IP> -p <main port> -d <install dir> -r <readonly port>
+
+# 2) Verify
+ssh <user>@<HOST_IP> 'curl -s http://127.0.0.1:<main port>/_admin/health'   # passwordless deploy returns JSON
+ssh <user>@<HOST_IP> 'systemctl cat mock-server | grep -E "WorkingDirectory|Environment|ExecStart"'
+```
+
+**No need to back up `config.json` for an upgrade** — the script keeps the remote copy by default (see below). Only add `-f` on purpose, and then back up first (`cp config.json config.json.bak.$(date +%F)`).
+
+- The script in order: stop old → check ports (incl. read-only) → upload `server.js` / `public/` / `tools/` → rewrite systemd unit → restart → health check → open ports.
+- **The remote `config.json` is kept untouched by default** (interfaces / rules / `users` / `meta.contactEmail` / `shareTokens` all live there — it is the single source of truth). What gets updated is code & frontend (`server.js`, `public/`, `README.md`, `tools/add-user.js`+`gen-pass.js`) and the systemd unit (must be rewritten or new args won't apply); nothing is deleted.
+- **Add `-f` only to force-overwrite**; `-f` replaces the whole file with your local copy, so back up first.
+- After a frontend (`public/`) update, hard-refresh the browser (`Cmd+Shift+R`); the server needs nothing.
+- Just changing args (port / read-only port) is also a rerun of `./deploy.sh` — no manual systemd editing.
+
 ---
 
-## 5. Wire it into the system under test
+## 6. Wire it into the system under test <!-- sec:wire-sut -->
 
 Taking "point one of the system-under-test's upstream interfaces at the mock" as an example, change the system-under-test config (field names depend on your system; this is illustrative only):
 
@@ -347,7 +463,7 @@ The host in the address is **the address you opened the UI with**, so opening `h
 
 ---
 
-## 6. Rule model
+## 7. Rule model <!-- sec:rule-model -->
 
 ```
 request → find interface (module + interface path exact match)
@@ -366,7 +482,7 @@ The `R1 / R2 / R3` badges in the UI are the match order, shown identically in lo
 
 ---
 
-## 7. How to configure conditions
+## 8. How to configure conditions <!-- sec:conditions -->
 
 A condition = **source + path + operator + value**. Four dropdowns/inputs in the UI, no coding.
 
@@ -420,7 +536,7 @@ Multiple conditions combine via "**all / any**".
 `ctx.body` / `ctx.query` / `ctx.headers` / `ctx.vars` and `helpers`, `return` an object or string:
 
 ```js
-// ctx.body：request body；ctx.vars：interface-level variables
+// ctx.body: request body; ctx.vars: interface-level variables
 const code = ctx.body.code || 'default';
 return {
   code: 0,
@@ -456,7 +572,7 @@ The module name is only for the mock's own entry matching (`/{module}/{interface
 
 ---
 
-## 8. Using the console
+## 9. Using the console <!-- sec:console -->
 
 Left = interface list (grouped), middle = rule editor, right = live logs, one line:
 
@@ -490,23 +606,54 @@ Top-right **auto / dark / light**, pure CSS variables, no reload:
 
 Top bar also has: **reload config** (after editing `config.json`), **export**, **import** (backup / migrate).
 
+### Read-only share links (let colleagues view rules)
+
+Top-bar **share icon** → "generate share link". Each link has a **copy icon** on the left (hover shows "copy link", click copies) and can be **revoked** on the right at any time:
+
+- The other party can only view rules, **cannot change config** (the server also blocks writes as a backstop);
+- After a link is revoked, opening it shows a "share link expired" page — it never degrades to an editable view;
+- With `READONLY_PORT` (read-only isolation port) configured at deploy, the share link uses a separate port — **stripping `?share=` still leaves it read-only**. Passwordless deploy must configure it or clicking "generate" returns 403.
+- Just add it to the one-click deploy: `./deploy.sh <user>@<HOST_IP> -r 18081` (see 5.2). Link looks like `http://<HOST_IP>:18081/?share=shr-xxxx`; on the read-only port `/login` is disabled and writes return 403.
+
+![Share-link dialog](docs/shot-share.png)
+
+### Login & user management
+
+| Item | Notes |
+| --- | --- |
+| Enable login | set `MOCK_ADMIN_PASS` at deploy (username defaults to `admin`, `MOCK_ADMIN_USER` overrides) |
+| Deploy admin | env-var account; can add/remove normal users |
+| Normal users | stored in `config.json` `users` (SHA-256 hash, no plaintext); after login click avatar → Users |
+| Passwordless deploy | no `MOCK_ADMIN_PASS` and empty `users` → console open, no login |
+| Calling mock APIs | **not affected by login**; the system-under-test needs no credentials |
+
+### In-console help (❓ icon)
+
+The ❓ next to the share icon opens the web manual (`public/help.html`) in a new tab: an illustrated guide for testers / integration colleagues — quick start, UI tour, rule config, try-once, logs, share links, FAQ. Single-file, zero-dependency, also visible in the read-only share view.
+
 ---
 
-## 9. Admin API (scripting)
+## 10. Admin API (scripting) <!-- sec:admin-api -->
 
 | Method | Path | Purpose |
 | --- | --- | --- |
 | GET | `/_admin/health` | health (apis / groups / rules / uptime) |
+| GET | `/_admin/auth` | auth state (whether login required, read-only share, share token expired) |
+| POST | `/_admin/login` | login (body: `{username, password}`, returns session token) |
 | GET | `/_admin/config` | read full config (incl. `groups`) |
 | POST | `/_admin/config` | save full config (body is the config JSON) |
 | POST | `/_admin/reload` | re-read `config.json` from disk |
+| GET / POST / DELETE | `/_admin/share` | read-only share links: list / generate / revoke (`?token=`) |
+| GET / POST / DELETE | `/_admin/users` | login user management (deploy admin only) |
 | GET | `/_admin/logs?limit=50` | recent request logs |
 | POST | `/_admin/logs/clear` | clear logs |
 | POST | `/_admin/test` | try once (body `{apiId, raw, body, query, headers}`, logs a "try" tag) |
 
+> All except `health` / `auth` / `login` require `Authorization: Bearer <token>` (session or share token). Login protects only the web console and these admin APIs; calling mock APIs directly (e.g. `/demo/...`) is completely unaffected.
+
 ---
 
-## 10. Import from a legacy mock platform
+## 11. Import from a legacy mock platform <!-- sec:import-legacy -->
 
 If the team previously used a "one hard-coded response" mock platform (e.g. `http://<LEGACY_MOCK_HOST>:8084/mock/mock.html`), interfaces can be migrated without re-entry:
 
@@ -529,7 +676,7 @@ node tools/import-legacy.js --prune                                # also drop i
 
 Two design notes:
 
-1. **Legacy response goes to the fallback, not a always-match rule**. The fallback is exactly "what to return when no rule matches", semantically matching the legacy hard-coded response; it's inactive while proxy is on and takes effect the moment proxy is off — add rules on top to upgrade it to a dynamic mock.
+1. **Legacy response goes to the fallback, not an always-match rule**. The fallback is exactly "what to return when no rule matches", semantically matching the legacy hard-coded response; it's inactive while proxy is on and takes effect the moment proxy is off — add rules on top to upgrade it to a dynamic mock.
 2. **`enableProxy=true` with a placeholder address (`xxx`, `test`) is forced off**. Such entries would just fire requests into the void; they return the recorded response instead, and the import lists them as a warning.
 
 **Idempotent**: interface id is derived from the path (`legacy-xxx`), so re-running updates rather than duplicates — safe to sync periodically during transition.
@@ -538,20 +685,7 @@ After import, click "reload config" in the running service's UI; no restart need
 
 ---
 
-## 11. Constraints you must know
-
-1. **Response shape must match the real interface**. The client has hard requirements on fields; missing fields cause NPE. When designing mock responses, always mirror the real interface's fields and types — required fields present, types consistent.
-2. **Rules are first-match-wins**. A broad rule on top eats everything below.
-3. **`config.json` is the single source of truth**. UI edits write back to the file immediately; editing the file directly requires "reload config" in the UI. Top level is `groups` + `apis`: `apis[].groupId` points to `groups[].id`; empty or deleted group → "ungrouped". Groups affect UI only, not routing.
-4. **Script mode executes JS**. Internal test tool only; keep it on the test network, not public.
-5. **Logs are in memory**, cleared on restart, default 200 entries (`config.json` `logSize`).
-6. Mock paths must not start with `/_admin` (reserved for admin API).
-7. **Static assets only match root / `styles/` / `scripts/` / files with extensions like `.css .js .json .ico .png .svg`**; everything else is treated as a mock interface. So mock interface paths **must not carry static suffixes** (`/demo/query.json` would be treated as a static file).
-8. Browser auto-requests `favicon.ico`, `/.well-known/*` **are not logged**; only real business calls appear.
-
----
-
-## Maintainer info (contact)
+## 12. Maintainer info (contact) <!-- sec:maintainer -->
 
 Two top-bar entries read their values from the `meta` field at the top of `config.json` — **nothing is hardcoded in source**:
 
@@ -573,9 +707,11 @@ Two top-bar entries read their values from the `meta` field at the top of `confi
 
 - After saving `config.json` the console picks it up automatically (or click "Reload" in the panel / restart the service).
 - `meta.repoUrl` only accepts `http(s)://` (the config is externally editable — don't let `javascript:` reach `window.open`).
-- Cloning this repo, others only need to edit this `meta` block — no source changes required.
+- Cloning this repo, others only need to edit this `meta` block — no source changes required. Set the **real email on the target machine**, not in the repo (see 5.2 "Set maintainer info after deploy").
 
-## 12. Directory layout
+---
+
+## 13. Directory layout <!-- sec:dir-layout -->
 
 ```
 mock-server/
@@ -583,28 +719,35 @@ mock-server/
 ├── config.json            # interface & rule config (single source of truth, desensitized to examples)
 ├── public/
 │   ├── index.html         # console page (CSS/JS use relative paths)
+│   ├── help.html          # web manual (top-bar ❓; single-file, self-styled, no deps)
+│   ├── help/              # manual screenshots (shot-console / shot-share)
 │   ├── styles/
 │   │   ├── tokens.css     # design tokens: color, type scale, spacing, theme (dark/light)
 │   │   ├── base.css       # reset, typography, focus, ambiance, motion fallback
 │   │   └── components.css # components & layout
 │   ├── scripts/main.js    # console logic (vanilla JS, no framework)
 │   └── sample-config.json # example config for offline preview only; not read at runtime
+├── docs/
+│   ├── 操作手册.md         # task-oriented quick reference (testers / integration)
+│   └── shot-*.png         # screenshots for README and the manual
 ├── tools/                 # helper scripts, not deployed
 │   ├── import-legacy.js   # import from legacy mock platform (idempotent, repeatable)
 │   ├── add-user.js        # add/update/remove console login users (writes config.json users)
 │   ├── gen-pass.js        # generate the SHA-256 hash of a password
 │   ├── verify-ui.js       # real-browser self-check: try-once / theme / type scale / contrast / narrow screen
-│   └── verify-login.js    # real-browser self-check: login wording / input not wiped / login boundary
+│   ├── verify-login.js    # real-browser self-check: login wording / input not wiped / login boundary
+│   ├── verify-docs.js     # doc-parity self-check: both READMEs must share the same section markers
+│   └── verify-deploy.sh  # deploy-script local sandbox: fake ssh, asserts readonly port etc. land in remote config
 ├── Dockerfile
 ├── docker-compose.yml
 ├── mock-server.service    # systemd unit template (deploy.sh generates the real one)
-├── deploy.sh              # one-click deploy: port/dir configurable, node path auto-detected
+├── deploy.sh              # one-click deploy: port/dir/readonly-port configurable, node path auto-detected
 └── README.md
 ```
 
 ---
 
-## 13. Typography & color (design intent)
+## 14. Typography & color (design intent) <!-- sec:typography -->
 
 The UI follows an "**industrial utility**" direction: monospaced numerals, hairline borders, high information density, a single amber accent.
 
@@ -623,3 +766,7 @@ node tools/verify-login.js http://127.0.0.1:18080/ admin admin123
 ```
 
 It asserts 30 checks: CN/EN login wording (catching raw keys like `login.username` leaking into the UI), input not wiped and focus not stolen while typing, the wrong-password message plus "clear password, keep username", successful entry into the console, and mock APIs staying reachable without a login.
+
+---
+
+> **Doc parity**: the section markers of this file and `README.md` are guarded by `tools/verify-docs.js`. After editing either, run it to confirm the two structures stay in sync.

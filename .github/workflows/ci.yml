@@ -29,6 +29,9 @@ jobs:
           done
           exit $fail
 
+      - name: Docs parity check (zh/en README section markers must match)
+        run: node tools/verify-docs.js
+
       - name: Smoke test (boot server, hit health endpoint)
         run: |
           PORT=18099 node server.js > /tmp/mock-server.log 2>&1 &

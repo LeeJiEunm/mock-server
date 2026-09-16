@@ -24,7 +24,8 @@
   },
   "scripts": {
     "start": "node server.js",
-    "verify:deploy": "bash tools/verify-deploy.sh"
+    "verify:deploy": "bash tools/verify-deploy.sh",
+    "verify:docs": "node tools/verify-docs.js"
   },
   "files": [
     "server.js",

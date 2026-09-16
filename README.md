@@ -7,18 +7,30 @@
 
 零依赖（只用 Node 内置模块），单进程，改规则不用重启。
 
-> **仓库**：<https://github.com/LeeJiEunm/mock-server> ｜ **作者**：LeeJiEunm ｜ **问题反馈**：<https://github.com/LeeJiEunm/mock-server/issues>
->
-> 克隆与启动（Node ≥ 16，无需 npm install）：
->
-> ```bash
-> git clone https://github.com/LeeJiEunm/mock-server.git
-> cd mock-server && node server.js     # 管理界面 http://127.0.0.1:18080/
-> ```
-
 ![控制台总览](docs/shot-console.png)
 
 <p align="center"><sub>控制台总览：左（接口列表）· 中（规则编排 + 试打）· 右（实时请求日志）｜<a href="docs/shot-share.png">分享链接弹窗</a>｜<a href="docs/shot-help.png">网页版操作手册</a></sub></p>
+
+---
+
+## 快速开始 <!-- sec:quickstart -->
+
+**本机联调（开发自测）**——不需要 `npm install`，Node ≥ 16 即可：
+
+```bash
+git clone https://github.com/LeeJiEunm/mock-server.git
+cd mock-server && node server.js     # 管理界面 http://127.0.0.1:18080/
+```
+
+**服务器部署（测试 / 项目人员长期使用）**——一键脚本自动探测 node、生成 systemd 单元、开机自启：
+
+```bash
+./deploy.sh <user>@<HOST_IP>          # 默认 /opt/mock-server + 端口 18080
+```
+
+> 仓库：<https://github.com/LeeJiEunm/mock-server> ｜ 作者：LeeJiEunm ｜ 问题反馈：<https://github.com/LeeJiEunm/mock-server/issues>
+
+---
 
 **文档入口**
 
@@ -30,9 +42,9 @@
 
 ---
 
-## 一、接入背景
+## 一、接入背景 <!-- sec:background -->
 
-本服务是一套**零依赖的 Node 挡板（mock / stub）**，用于**联调 / 测试阶段替换上游真实接口**。
+本服务是一套**零依赖的 Node 挡板（mock）**，用于**联调 / 测试阶段替换上游真实接口**。
 
 它的定位是一个通用的、可配置的接口模拟器：
 
@@ -40,13 +52,13 @@
 - 可模拟**服务异常（500）、超时（延迟）、业务失败（自定义状态码）** 等分支，覆盖正向与反向用例；
 - 配合「试打」功能，不连真实上游就能验证规则是否命中。
 
-挡板能力是通用的（按模块 + 接口路径匹配，规则可配），既可替换一个上游服务里的某个接口，也能接管整条链路。本项目自带 `demo` 模块作为示例，其余模块可通过对界面录入或从老 mock 平台导入得到（见[第十章](#十从老-mock-平台导入)）。
+挡板能力是通用的（按模块 + 接口路径匹配，规则可配），既可替换一个上游服务里的某个接口，也能接管整条链路。本项目自带 `demo` 模块作为示例，其余模块可通过对界面录入或从老 mock 平台导入得到（见[第十一章](#十一从老-mock-平台导入)）。
 
 > ⚠️ 本服务仅限内网测试网段使用。脚本模式下会直接执行 JS，请勿暴露到公网。
 
 ---
 
-## 二、特性
+## 二、特性 <!-- sec:features -->
 
 - **零依赖**：只用 Node 内置模块（`crypto.randomUUID()` 等），不 `npm install`，一个目录即可带走。
 - **动态规则**：每个接口由「多条带条件的规则 + 兜底返回」组成，命中即停。
@@ -59,11 +71,26 @@
 
 ---
 
-## 三、本地部署（开发机 / 联调用）
+## 三、上手前必读（约束） <!-- sec:must-know -->
+
+这几条是「不读就会踩坑」的保命项，建议部署前先过一遍：
+
+1. **⚠️ 仅限内网测试网段**。脚本模式直接执行 JS，请只在测试网段开放，不要暴露到公网。
+2. **⚠️ `config.json` 是唯一数据源**。界面上的改动会立即写回文件；直接改文件则需要在界面上点「重新读取配置」。配置最外层是 `groups` + `apis` 两个数组：`apis[].groupId` 指向 `groups[].id`，留空或指向已删除分组会落到「未分组」。分组只影响界面归类，不参与请求路由。
+3. **⚠️ 规则是按顺序命中即停**。把宽的规则放上面会吃掉后面所有规则。
+4. **⚠️ 响应结构要贴合真实接口**。被测客户端对返回字段有硬要求，字段缺了会 NPE。设计挡板响应时，务必对照真实接口的字段与类型，确保必填字段齐全、类型一致。
+5. 挡板路径不能以 `/_admin` 开头，那是管理接口的保留前缀。
+6. **静态资源只走「根路径 / `styles/` / `scripts/` / 带 `.css .js .json .ico .png .svg` 等后缀」这几类**，其余路径一律当挡板接口处理。所以挡板接口路径**不要带静态后缀**（`/demo/query.json` 会被当成静态文件）。
+7. 日志在内存里，重启即清空，默认保留 200 条（`config.json` 的 `logSize` 可调）。
+8. 浏览器自动请求的 `favicon.ico`、`/.well-known/*` **不会进请求日志**，日志里只剩真实业务调用。
+
+---
+
+## 四、本地部署（开发机 / 联调用） <!-- sec:local-deploy -->
 
 本地部署就是在本机（macOS 或 Windows）直接跑起服务，用浏览器打开管理界面配规则、把被测系统的上游地址指到本机即可。不需要 `npm install`。
 
-### 3.1 macOS
+### 4.1 macOS <!-- sec:local-mac -->
 
 ```bash
 # 1) 确认本机有 Node（建议 >= 16）
@@ -81,7 +108,7 @@ node server.js
 
 > macOS 上常把上游地址配成 `http://127.0.0.1:18080/demo`；注意地址结尾不要带 `/`。
 
-### 3.2 Windows
+### 4.2 Windows <!-- sec:local-win -->
 
 Windows 上需要先装 Node，再用 PowerShell 或 CMD 启动：
 
@@ -105,7 +132,7 @@ Windows 上需要先装 Node，再用 PowerShell 或 CMD 启动：
 
 > 若被测系统和挡板不在同一台机器，把地址里的 `127.0.0.1` 换成挡板所在机器的**局域网 IP**（如 `http://192.168.x.x:18080/demo`），并确认防火墙放行 18080 端口。
 
-### 3.3 本地常用操作
+### 4.3 本地常用操作 <!-- sec:local-common -->
 
 ```bash
 # 改端口（环境变量优先于 config.json 的 server.port，再优先于默认值 18080）
@@ -164,7 +191,7 @@ node tools/add-user.js --remove zhangsan   # 删除用户
 
 端口取值优先级：`PORT` 环境变量 > `config.json` 的 `server.port` > `18080`。
 
-### 3.4 界面语言（部署期默认语言）
+### 4.4 界面语言（部署期默认语言） <!-- sec:local-lang -->
 
 控制台界面支持**中文 / 英文**两套文案，且**登录页也带语言切换**——登录卡片底部有「中文 / English」两个按钮，未登录时就能选，选完登录后的控制台文案也跟着变。
 
@@ -186,7 +213,7 @@ MOCK_DEFAULT_LANG=en MOCK_ADMIN_PASS=secret node server.js
 
 ---
 
-## 四、服务器部署（测试机 / 长期联调环境）
+## 五、服务器部署（测试机 / 长期联调环境） <!-- sec:server-deploy -->
 
 服务器部署面向一台常开的测试机（Linux，通常是 CentOS 7 / Ubuntu）。三种方式任选：
 
@@ -194,7 +221,7 @@ MOCK_DEFAULT_LANG=en MOCK_ADMIN_PASS=secret node server.js
 - **systemd 手工部署**：适合想自己掌控 service 文件的场景。
 - **Docker 部署**：宿主机不需要装 node，node 在容器里。
 
-### 4.1 前置条件
+### 5.1 前置条件 <!-- sec:server-prereq -->
 
 | 项 | 说明 |
 | --- | --- |
@@ -220,7 +247,7 @@ SSH 登录（可选）：脚本已用 SSH 连接复用处理密码（见上方�
 ssh-copy-id <user>@<HOST_IP>
 ```
 
-### 4.2 一键部署（deploy.sh）
+### 5.2 一键部署（deploy.sh） <!-- sec:server-onclick -->
 
 在**本机**（存放交付包的目录）执行，脚本会自动 ssh 到目标机：
 
@@ -264,7 +291,7 @@ cd mock-server
 
 > `-r` 与 `-p` 不能相同（相同则 server.js 会静默不启用只读监听）；脚本会在部署前直接报错拦住。端口被占也会在部署前退出（含只读端口），不会部署出一个「界面正常但分享链接打不开」的半成品。
 
-部署时就开启控制台登录（可选，详见 3.3；**在脚本前面加环境变量**即可）：
+部署时就开启控制台登录（可选，详见 4.3；**在脚本前面加环境变量**即可）：
 
 ```bash
 # 指定管理员用户名 + 密码
@@ -277,7 +304,7 @@ MOCK_ADMIN_PASS=secret ./deploy.sh root@<HOST_IP>
 node tools/add-user.js zhangsan secret
 ./deploy.sh root@<HOST_IP> -f
 
-# 同时指定部署期默认语言（en / zh-CN，详见 3.4）
+# 同时指定部署期默认语言（en / zh-CN，详见 4.4）
 MOCK_DEFAULT_LANG=en MOCK_ADMIN_PASS=secret ./deploy.sh root@<HOST_IP>
 ```
 
@@ -313,8 +340,8 @@ const fs = require('fs');
 const p = 'config.json';
 const c = JSON.parse(fs.readFileSync(p, 'utf8'));
 c.meta = Object.assign({ contactLabel: '维护者' }, c.meta, {
-  contactEmail: 'you@example.com',                                  // 真实联系邮箱
-  repoUrl: 'https://github.com/LeeJiEunm/mock-server',              // 顶栏 GitHub 按钮打开的地址
+  contactEmail: 'you@example.com',                          // 真实联系邮箱
+  repoUrl: 'https://github.com/LeeJiEunm/mock-server',      // 顶栏 GitHub 按钮打开的地址
   repoLabel: 'mock-server',
 });
 fs.writeFileSync(p, JSON.stringify(c, null, 2));
@@ -328,7 +355,7 @@ REMOTE
 - 这些值只能通过 `config.json` 设置（面板上是展示用，不能编辑）。
 - 重跑 `./deploy.sh` **不会覆盖远端 `config.json`**（默认保留远端那份），所以设过就一直有效；只有加 `-f` 才会用本地那份覆盖。
 
-### 4.3 systemd 手工部署
+### 5.3 systemd 手工部署 <!-- sec:server-systemd -->
 
 不用脚本时，照 `mock-server.service` 模板填 4 个占位符后传到目标机：
 
@@ -348,7 +375,7 @@ ssh <user>@<HOST_IP> 'command -v node'
 ssh <user>@<HOST_IP> 'sudo systemctl daemon-reload && sudo systemctl enable --now mock-server'
 ```
 
-### 4.4 Docker 部署
+### 5.4 Docker 部署 <!-- sec:server-docker -->
 
 宿主机只需装好 docker + compose，不需要 node：
 
@@ -361,7 +388,7 @@ MOCK_PORT=18080 docker compose up -d --build
 - 容器 `restart: unless-stopped`，宿主机重启后自动拉起。
 - **要只读端口就别手改 compose**：用 `./deploy.sh <user>@<HOST_IP> -m docker -r <宿主机只读端口>`——脚本会在远端生成 `docker-compose.readonly.yml` 叠加文件，把 `<宿主机只读端口>` 映射到**容器内的 18081**，并给容器注入 `READONLY_PORT=18081`，再以 `-f docker-compose.yml -f docker-compose.readonly.yml` 启动。容器内只读端口必须与容器内主端口（18080）不同，所以容器里固定用 18081，宿主机暴露哪个端口由 `-r` 决定。
 
-### 4.5 开机自启与日常运维
+### 5.5 开机自启与日常运维 <!-- sec:server-ops -->
 
 | 场景 | 命令（本机执行，目标机为 `<user>@<HOST_IP>`） |
 | --- | --- |
@@ -370,7 +397,7 @@ MOCK_PORT=18080 docker compose up -d --build
 | 看日志 | `ssh <user>@<HOST_IP> 'journalctl -u mock-server -n 50 --no-pager'` |
 | 确认开机自启 | `ssh <user>@<HOST_IP> 'systemctl is-enabled mock-server'` |
 | 取回配置 | `scp <user>@<HOST_IP>:/opt/mock-server/config.json ./config.json` |
-| 换端口重部署 | `./deploy.sh <user>@<HOST_IP> -p 18081` |
+| 换端口重部署 | `./deploy.sh root@<HOST_IP> -p 18081` |
 
 - 服务器重启 → 服务自动起来（已 `enable`）。
 - 进程意外挂掉 → `Restart=always` 3 秒后自动拉起。
@@ -384,9 +411,7 @@ curl -s http://<HOST_IP>:18080/_admin/health
 # {"ok":true,"port":18080,"apis":2,"groups":1,"rules":6}
 ```
 
----
-
-### 4.6 更新已有部署（升级到新版本）
+### 5.6 更新已有部署（升级到新版本） <!-- sec:server-upgrade -->
 
 `deploy.sh` 是**幂等**的：对同一台机器、同一套参数再跑一次就是升级。参数（`-p` 主端口、`-d` 安装目录）要与首次部署一致，只读端口按需带上。
 
@@ -408,7 +433,9 @@ ssh <user>@<HOST_IP> 'systemctl cat mock-server | grep -E "WorkingDirectory|Envi
 - 前端（`public/`）更新后，浏览器要 `Cmd+Shift+R` 强刷一次；服务端不用管。
 - 只想改参数（换端口 / 开只读端口）也是重跑 `deploy.sh`，不用手工编辑 systemd 单元。
 
-## 五、接进被测系统
+---
+
+## 六、接进被测系统 <!-- sec:wire-sut -->
 
 以「把被测系统的某个上游接口指向挡板」为例，改被测服务的配置（字段名以被测系统为准，这里只是示意）：
 
@@ -437,7 +464,7 @@ upstream.service.demo.token=mock                    # 挡板不校验，随便�
 
 ---
 
-## 六、规则模型
+## 七、规则模型 <!-- sec:rule-model -->
 
 ```
 请求 → 找到接口（模块 + 接口路径精确匹配）
@@ -456,7 +483,7 @@ upstream.service.demo.token=mock                    # 挡板不校验，随便�
 
 ---
 
-## 七、条件怎么配
+## 八、条件怎么配 <!-- sec:conditions -->
 
 一条条件 = **取值来源 + 路径 + 操作符 + 比较值**。界面上是四个下拉/输入框，不用写代码。
 
@@ -546,7 +573,7 @@ return {
 
 ---
 
-## 八、管理面板使用
+## 九、管理面板使用 <!-- sec:console -->
 
 左侧是接口列表（按分组归拢），中间是规则编排，右侧是实时日志，三栏一条线：
 
@@ -587,7 +614,7 @@ return {
 - 对方打开链接只能查看规则，**改不了配置**（服务端同步兜底拦截写请求）；
 - 链接被撤销后，对方打开会看到「分享链接已失效」提示页，不会降级为可编辑视图；
 - 部署时配置 `READONLY_PORT`（只读隔离端口）后，分享链接走独立端口——**对方把 URL 上的 `?share=` 去掉也依然只读**。免密部署必须配置它才允许生成分享链接（否则界面上点「生成」返回 403）。
-- 一键部署直接带上它即可：`./deploy.sh <user>@<HOST_IP> -r 18081`（详见 4.2）。链接形如 `http://<HOST_IP>:18081/?share=shr-xxxx`；只读端口上 `/login` 被禁、写操作一律 403。
+- 一键部署直接带上它即可：`./deploy.sh <user>@<HOST_IP> -r 18081`（详见 5.2）。链接形如 `http://<HOST_IP>:18081/?share=shr-xxxx`；只读端口上 `/login` 被禁、写操作一律 403。
 
 ![分享链接弹窗](docs/shot-share.png)
 
@@ -607,7 +634,7 @@ return {
 
 ---
 
-## 九、管理接口（脚本化调用）
+## 十、管理接口（脚本化调用） <!-- sec:admin-api -->
 
 | 方法 | 路径 | 用途 |
 | --- | --- | --- |
@@ -623,11 +650,11 @@ return {
 | POST | `/_admin/logs/clear` | 清空日志 |
 | POST | `/_admin/test` | 试打一枪（body：`{apiId, raw, body, query, headers}`，会记一条带「试打」标签的日志） |
 
-> 除 `health` / `auth` / `login` 外，其余接口均需 `Authorization: Bearer <token>`（登录会话或分享令牌）。
+> 除 `health` / `auth` / `login` 外，其余接口均需 `Authorization: Bearer <token>`（登录会话或分享令牌）。登录只保护 Web 管理界面与这些管理接口；直接调用 mock 接口（如 `/demo/...`）完全不受影响。
 
 ---
 
-## 十、从老 mock 平台导入
+## 十一、从老 mock 平台导入 <!-- sec:import-legacy -->
 
 若团队此前在用另一套「一份写死的返回」类 mock 平台（如 `http://<LEGACY_MOCK_HOST>:8084/mock/mock.html`），上面的接口可直接搬过来，不用手动重新录：
 
@@ -659,20 +686,7 @@ node tools/import-legacy.js --prune                                # 顺带清�
 
 ---
 
-## 十一、必须知道的几条约束
-
-1. **响应结构要贴合真实接口**。被测客户端对返回字段有硬要求，字段缺了会 NPE。设计挡板响应时，务必对照真实接口的字段与类型，确保必填字段齐全、类型一致。
-2. **规则是按顺序命中即停**。把宽的规则放上面会吃掉后面所有规则。
-3. **`config.json` 是唯一数据源**。界面上的改动会立即写回文件；直接改文件则需要在界面上点「重新读取配置」。配置最外层是 `groups` + `apis` 两个数组：`apis[].groupId` 指向 `groups[].id`，留空或指向已删除分组会落到「未分组」。分组只影响界面归类，不参与请求路由。
-4. **脚本模式直接执行 JS**。这是内网测试工具，请只在测试网段开放，不要暴露到公网。
-5. **日志在内存里**，重启即清空，默认保留 200 条（`config.json` 的 `logSize` 可调）。
-6. 挡板路径不能以 `/_admin` 开头，那是管理接口的保留前缀。
-7. **静态资源只走「根路径 / `styles/` / `scripts/` / 带 `.css .js .json .ico .png .svg` 等后缀」这几类**，其余路径一律当挡板接口处理。所以挡板接口路径**不要带静态后缀**（`/demo/query.json` 会被当成静态文件）。
-8. 浏览器自动请求的 `favicon.ico`、`/.well-known/*` **不会进请求日志**，日志里只剩真实业务调用。
-
----
-
-## 维护者信息（联系方式）
+## 十二、维护者信息（联系方式） <!-- sec:maintainer -->
 
 | 项目 | 值 |
 | --- | --- |
@@ -701,10 +715,12 @@ node tools/import-legacy.js --prune                                # 顺带清�
 - 改这一处即可，不必改动任何源码；保存后控制台自动读取（或点面板里的「重新读取」/重启服务）。
 - 仓库地址只接受 `http(s)://`（配置是外部可编辑的，避免 `javascript:` 之类的值被 `window.open` 执行）。
 - **真实邮箱部署时再填**，不要在仓库里改（否则会随 git 提交出去）；仓库地址是公开信息，工程内直接带真值：
-  直接改远端 `<安装目录>/config.json` 的 `meta.*`，命令见 4.2 末的「部署后设置维护者信息」。
+  直接改远端 `<安装目录>/config.json` 的 `meta.*`，命令见 5.2 末的「部署后设置维护者信息」。
 - 他人克隆本项目后同理，只需改自己那份 `config.json`。
 
-## 十二、目录结构
+---
+
+## 十三、目录结构 <!-- sec:dir-layout -->
 
 ```
 mock-server/
@@ -729,7 +745,8 @@ mock-server/
 │   ├── gen-pass.js        # 生成密码的 SHA-256 哈希
 │   ├── verify-ui.js       # 真浏览器自检：试打反馈 / 主题 / 字阶 / 对比度 / 窄屏输入框
 │   ├── verify-login.js    # 真浏览器自检：登录文案 / 输入不被清空 / 登录边界（mock 免登录）
-│   └── verify-deploy.sh   # 部署脚本本地沙盘自检：假 ssh，断言只读端口等参数真的落到远端配置
+│   ├── verify-docs.js     # 中英文档对齐自检：两份 README 的章节标记必须一致
+│   └── verify-deploy.sh  # 部署脚本本地沙盘自检：假 ssh，断言只读端口等参数真的落到远端配置
 ├── package.json           # 工程元数据（name=mock-server / 仓库地址 / 作者 / npm start）
 ├── .gitignore             # 忽略日志、备份、临时文件（config.json 故意入库，见文件头说明）
 ├── Dockerfile
@@ -745,7 +762,7 @@ mock-server/
 
 ---
 
-## 十三、排版与配色（设计取向）
+## 十四、排版与配色（设计取向） <!-- sec:typography -->
 
 界面走「**工业实用**」方向：等宽数字、发丝边框、高密度信息、单一琥珀强调色。
 
@@ -764,3 +781,7 @@ node tools/verify-login.js http://127.0.0.1:18080/ admin admin123
 ```
 
 它断言 30 项：中英文登录文案（防止界面直接显示 `login.username` 这种原始 key）、输入过程中不被清空 / 焦点不被抢走、密码错的中文提示与「只清密码保留用户名」、登录后能进控制台、以及 mock 接口免登录照样 200。
+
+---
+
+> **文档对齐**：本文件与 `README.en.md` 的章节标记由 `tools/verify-docs.js` 守护，修改任一份后请运行它确认两份结构一致。
