@@ -28,19 +28,9 @@ if (typeof fetch === 'undefined' || typeof WebSocket === 'undefined') {
   process.exit(2);
 }
 
-const { spawn } = require('child_process');
 const fs = require('fs');
-const os = require('os');
 const path = require('path');
-const net = require('net');
-
-const CHROME_CANDIDATES = [
-  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  '/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary',
-  '/usr/bin/google-chrome',
-  '/usr/bin/chromium',
-  '/usr/bin/chromium-browser',
-];
+const cdp = require('./lib/cdp');
 
 const BASE = (process.argv[2] || 'http://127.0.0.1:18080/').replace(/\/+$/, '') + '/';
 const OUT = process.argv[3] || path.join(process.cwd(), 'shots');
@@ -64,60 +54,14 @@ const SCENES = [
   },
 ];
 
-/* ------------------------------ CDP 小客户端 ------------------------------ */
+/* ------------------------------ CDP 客户端 ------------------------------ */
+/* 起 Chrome / 连接 / 截图统一走 tools/lib/cdp.js；下面保留 send 这个旧名字。 */
 
 let chrome = null;
-let ws = null;
-let msgId = 0;
-function send(method, params) {
-  const id = ++msgId;
-  return new Promise((resolve, reject) => {
-    const onMessage = (event) => {
-      const data = JSON.parse(event.data);
-      if (data.id !== id) return;
-      ws.removeEventListener('message', onMessage);
-      if (data.error) reject(new Error(method + ': ' + JSON.stringify(data.error)));
-      else resolve(data.result);
-    };
-    ws.addEventListener('message', onMessage);
-    ws.send(JSON.stringify({ id, method, params: params || {} }));
-  });
-}
+let page = null;
+function send(method, params) { return page.send(method, params); }
 
-const sleep = (ms) => new Promise((r) => setTimeout(r, ms));
-
-function getFreePort() {
-  return new Promise((resolve, reject) => {
-    const srv = net.createServer();
-    srv.unref();
-    srv.on('error', reject);
-    srv.listen(0, '127.0.0.1', () => {
-      const port = srv.address().port;
-      srv.close(() => resolve(port));
-    });
-  });
-}
-
-function findChrome() {
-  const hit = CHROME_CANDIDATES.find((f) => fs.existsSync(f));
-  if (!hit) {
-    console.error('找不到 Chrome / Chromium，请手动改 CHROME_CANDIDATES');
-    process.exit(2);
-  }
-  return hit;
-}
-
-async function attach(port) {
-  for (let i = 0; i < 60; i++) {
-    try {
-      const res = await fetch('http://127.0.0.1:' + port + '/json/list');
-      const page = (await res.json()).find((t) => t.type === 'page');
-      if (page && page.webSocketDebuggerUrl) return page.webSocketDebuggerUrl;
-    } catch (e) { /* Chrome 还没起来 */ }
-    await sleep(250);
-  }
-  throw new Error('Chrome 调试端口没起来');
-}
+const sleep = cdp.sleep;
 
 async function evaluate(expression) {
   const out = await send('Runtime.evaluate', { expression, awaitPromise: true, returnByValue: true });
@@ -136,27 +80,10 @@ async function shoot(file, clip) {
 
 async function main() {
   fs.mkdirSync(OUT, { recursive: true });
-  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'mock-shot-'));
-  const port = await getFreePort();
-  chrome = spawn(findChrome(), [
-    '--headless=new',
-    '--remote-debugging-port=' + port,
-    '--user-data-dir=' + profile,
-    '--no-first-run',
-    '--no-default-browser-check',
-    '--disable-gpu',
-    '--hide-scrollbars',
-    'about:blank',
-  ], { stdio: 'ignore' });
-
-  const wsUrl = await attach(port);
-  ws = new WebSocket(wsUrl);
-  await new Promise((resolve) => ws.addEventListener('open', resolve));
-  await send('Runtime.enable');
-  await send('Page.enable');
-  await send('Emulation.setDeviceMetricsOverride', {
-    width: 1440, height: 900, deviceScaleFactor: 1, mobile: false,
+  chrome = await cdp.launchChrome({
+    width: 1440, height: 900, profilePrefix: 'mock-shot-', args: ['--hide-scrollbars'],
   });
+  page = await cdp.connect(chrome.port);
 
   console.log('目标：' + BASE);
   console.log('输出：' + OUT);
@@ -204,14 +131,14 @@ async function main() {
     }
   }
 
-  if (chrome) chrome.kill();
-  await sleep(200);
-  try { fs.rmSync(profile, { recursive: true, force: true }); } catch (e) { /* 清理失败不影响结果 */ }
+  if (page) await page.close();
+  if (chrome) await chrome.close();     // 杀 Chrome + 清临时 profile
   process.exit(failed ? 1 : 0);
 }
 
-main().catch((e) => {
+main().catch(async (e) => {
   console.error(e);
-  if (chrome) chrome.kill();
+  if (page) await page.close();
+  if (chrome) await chrome.close();
   process.exit(2);
 });

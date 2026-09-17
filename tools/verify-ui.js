@@ -18,96 +18,21 @@
  * 退出码：0 = 全部通过；1 = 有断言失败（详细结果打印在下面）。
  */
 
-const { spawn } = require('child_process');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const net = require('net');
-
-const CHROME_CANDIDATES = [
-  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  '/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary',
-  '/usr/bin/google-chrome',
-  '/usr/bin/chromium',
-  '/usr/bin/chromium-browser',
-];
+const cdp = require('./lib/cdp');
 
 const BASE = (process.argv[2] || 'http://127.0.0.1:18080/').replace(/\/+$/, '') + '/';
-let PORT = 0; // 运行时动态选空闲端口，避免连到上一轮残留的 Chrome
+let PORT = 0; // 运行时动态选空闲端口，避免连到上一轮残留的 Chrome（由 cdp.launchChrome 现取）
 
-function getFreePort() {
-  return new Promise((resolve, reject) => {
-    const srv = net.createServer();
-    srv.unref();
-    srv.on('error', reject);
-    srv.listen(0, '127.0.0.1', () => {
-      const port = srv.address().port;
-      srv.close(() => resolve(port));
-    });
-  });
-}
+const sleep = cdp.sleep;
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-function findChrome() {
-  const hit = CHROME_CANDIDATES.find((file) => fs.existsSync(file));
-  if (!hit) {
-    console.error('找不到 Chrome / Chromium，请手动改 CHROME_CANDIDATES');
-    process.exit(2);
-  }
-  return hit;
-}
-
-/* ------------------------------ CDP 小客户端 ------------------------------ */
-
+/* ------------------------------ CDP 客户端 ------------------------------ */
+/* 起 Chrome / 连接 / 命令超时 / 页面报错采集统一在 tools/lib/cdp.js。
+ * 这里只保留 send 这个旧名字（转发给 page.send，同名同参），
+ * 这样下面两千多行的调用点一行都不用动。 */
 let chrome = null;
-let ws = null;
-let msgId = 0;
+let page = null;
 
-/* 单条 CDP 命令的超时。**必须挂**：Chrome 中途崩掉/断开时，若不挂超时，
- * 这个 Promise 会永久 pending，事件循环变空 → Node 直接静默退出 0，
- * 输出只剩开头一行「目标：」，看起来像「全绿通过」，实则一项都没跑（2026-09-15 实际踩到）。
- * 挂了超时后，定时器让事件循环保持活跃 → 必定报出明确错误，不再伪装成功。 */
-const CMD_TIMEOUT_MS = 30000;
-
-function send(method, params) {
-  const id = ++msgId;
-  return new Promise((resolve, reject) => {
-    let done = false;
-    let timer = null;
-    const onMessage = (event) => {
-      const data = JSON.parse(event.data);
-      if (data.id !== id) return;
-      if (data.error) finish(reject, new Error(method + ': ' + JSON.stringify(data.error)));
-      else finish(resolve, data.result);
-    };
-    function finish(fn, arg) {
-      if (done) return;
-      done = true;
-      if (timer) clearTimeout(timer);
-      ws.removeEventListener('message', onMessage);
-      fn(arg);
-    }
-    timer = setTimeout(() => {
-      finish(reject, new Error(method + ' 超时 ' + CMD_TIMEOUT_MS + 'ms（Chrome 可能已崩溃/断开）'));
-    }, CMD_TIMEOUT_MS);
-    ws.addEventListener('message', onMessage);
-    try { ws.send(JSON.stringify({ id: id, method: method, params: params || {} })); }
-    catch (e) { finish(reject, e); }
-  });
-}
-
-async function attach() {
-  for (let i = 0; i < 60; i++) {
-    try {
-      const res = await fetch('http://127.0.0.1:' + PORT + '/json/list');
-      const page = (await res.json()).find((target) => target.type === 'page');
-      if (page && page.webSocketDebuggerUrl) return page.webSocketDebuggerUrl;
-    } catch (e) { /* Chrome 还没起来 */ }
-    await sleep(250);
-  }
-  throw new Error('Chrome 调试端口没起来');
-}
+function send(method, params) { return page.send(method, params); }
 
 /* 只读护栏：前端有些开关一拨就会把配置 POST 回服务端（例如左侧的接口启停开关，
  * 它测的是「停用后右侧状态标签同步变色」，一拨就真的落盘）。
@@ -134,8 +59,7 @@ async function runAt(width, height, source, extraQuery) {
   });
 
   const consoleErrors = [];
-  const collect = (event) => {
-    const data = JSON.parse(event.data);
+  const collect = (data) => {
     if (data.method === 'Runtime.consoleAPICalled' && data.params.type === 'error') {
       consoleErrors.push(data.params.args.map((arg) => arg.value || arg.description || '').join(' '));
     }
@@ -145,7 +69,7 @@ async function runAt(width, height, source, extraQuery) {
     }
     if (data.method === 'Runtime.evaluate' && data.params.context) { /* noop */ }
   };
-  ws.addEventListener('message', collect);
+  const stopCollect = page.on(collect);
 
   // 带宽高变化的缓存：每次都重新加载，避免拿到上一次的 DOM
   // 只读分享校验需要把 ?share= 令牌带进导航地址，extraQuery 非空时拼在前面
@@ -159,7 +83,7 @@ async function runAt(width, height, source, extraQuery) {
     returnByValue: true,
   });
 
-  ws.removeEventListener('message', collect);
+  stopCollect();
   return {
     consoleErrors: consoleErrors,
     result: out.result ? out.result.value : null,
@@ -1259,25 +1183,10 @@ return out;
 `;
 
 async function main() {
-  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'mock-verify-'));
-  PORT = await getFreePort();
-  chrome = spawn(findChrome(), [
-    '--headless=new',
-    '--no-sandbox',
-    '--disable-dev-shm-usage',
-    '--remote-debugging-port=' + PORT,
-    '--user-data-dir=' + profile,
-    '--no-first-run',
-    '--no-default-browser-check',
-    '--disable-gpu',
-    'about:blank',
-  ], { stdio: 'ignore' });
-
-  const wsUrl = await attach();
-  ws = new WebSocket(wsUrl);
-  await new Promise((resolve) => ws.addEventListener('open', resolve));
-  await send('Runtime.enable');
-  await send('Page.enable');
+  /* 起 Chrome、连页面目标、命令超时、页面报错采集，统一由 tools/lib/cdp.js 负责 */
+  chrome = await cdp.launchChrome({ profilePrefix: 'mock-verify-' });
+  PORT = chrome.port;
+  page = await cdp.connect(PORT);
 
   console.log('目标：' + BASE);
 
@@ -2512,14 +2421,14 @@ const configBefore = await configFingerprint();
   console.log('');
   console.log(failed === 0 ? '全部通过（' + results.length + ' 项）' : failed + ' / ' + results.length + ' 项失败');
 
-  ws.close();
-  chrome.kill();
+  if (page) await page.close();
+  if (chrome) await chrome.close();
   process.exit(failed === 0 ? 0 : 1);
 }
 
-main().catch((err) => {
+main().catch(async (err) => {
   console.error('自检执行失败：' + err.message);
-  if (ws) ws.close();
-  if (chrome) chrome.kill();
+  if (page) await page.close();
+  if (chrome) await chrome.close();
   process.exit(2);
 });

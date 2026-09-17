@@ -2,7 +2,7 @@
  * i18n.js —— 中 / 英 文案
  *  - index.html 里的静态文本：加 data-i18n（纯文本）或 data-i18n-html（含标签）属性，
  *    加载后由 applyI18n() 统一回填。
- *  - main.js 里动态生成的文本：用 t('key', {n: x}) 取词。
+ *  - 前端脚本里动态生成的文本：用 t('key', {n: x}) 取词。
  *  - 图标符号（＋ ✎ ✕ ☰ ▼ ▲ ↑ ↓ ⧉ ⋮⋮）不是语言文本，一律保留原样，不进词典。
  *  - 示例响应数据、接口默认名称、返回内容属于「数据」而非「界面」，保持中文。
  * ========================================================================== */
@@ -71,7 +71,7 @@
       'drawer.saveRule': '保存规则',
       'drawer.saveApi': '保存接口',
       'drawer.saveDefault': '保存兜底响应',
-      /* 只在"保存后真的收不到请求"时替换掉「保存接口」（判定见 main.js 的 updatePathConflict）。
+      /* 只在"保存后真的收不到请求"时替换掉「保存接口」（判定见 drawer.js 的 updatePathConflict）。
        * 挂在按钮上而不是弹二次确认：备份场景的同路径是正当用法，不能拦，
        * 但按钮是必经路径，改文案能让用户在按下之前看见后果。 */
       'drawer.saveWillNotHit': '保存（不会命中）',
@@ -248,6 +248,7 @@
       'log.reqBody': '请求体',
       'log.respBody': '返回体',
       'log.emptyBody': '（空）',
+      'log.truncated': '体积超限：日志里只留了前半段，回给调用方的 body 是完整的。',
       'log.onlyThisApi': '只看当前接口',
       'log.onlyThisApiTitle': '只显示当前选中接口的请求记录',
       'log.filteredEmpty': '当前接口还没有请求记录。<br>切回「全部」可以看其他接口。',
@@ -315,9 +316,9 @@
       'resp.status': 'HTTP 状态',
       'resp.delay': '延迟（毫秒）',
       'resp.delayMax': '最大延迟',
-      'resp.delayRangeTip': '最大延迟大于延迟时，每次请求在两者之间随机取值（例：200~600 模拟网络抖动）；填 0 或留空就是固定延迟。',
+      'resp.delayRangeTip': '最大延迟大于延迟时，每次请求在两者之间随机取值（例：200~600 模拟网络抖动）；填 0 或留空就是固定延迟。单个请求最多挂起 30 秒，超出按 30 秒算。',
       'resp.fault': '故障注入',
-      'resp.faultHint': '模拟上游异常，用来验证调用方有没有做超时/容错。真实调用生效，「试打一枪」只标注不制造故障。',
+      'resp.faultHint': '模拟上游异常，用来验证调用方有没有做超时/容错。真实调用生效，「试打一枪」只标注不制造故障。延迟与 timeout 都要占住连接，同时挂住的超过 50 个时，多出来的请求直接返回 503（不排队）。',
       'resp.faultNone': '关闭',
       'resp.faultTimeout': '超时挂起（不返回）',
       'resp.faultMalformed': '畸形响应体（截断 JSON）',
@@ -432,10 +433,12 @@
       'rule.condPath': '?',
       'offline.toast': '离线预览模式，改动不会保存',
       'save.fail': '保存失败：{msg}',
+      'save.conflict': '保存冲突：{msg}',
+      'save.unknown': '未知错误',
       'login.expired': '未登录或登录已过期，请重新登录',
       'url.copyFail': '复制失败，请手动选中',
       /* 顺手补（2026-09-15）：中栏「复制地址」成功后的 toast 原本是硬编码中文
-       * （main.js 里的 '完整调用地址已复制：' + url），英文界面下会漏出中文。 */
+       * （前端脚本里的 '完整调用地址已复制：' + url），英文界面下会漏出中文。 */
       'url.copied': '完整调用地址已复制：{url}',
       'try.offline': '离线预览模式：试打需要服务端参与判定',
       'try.badJson': '请求体不是合法 JSON，已按原文比较',
@@ -477,7 +480,7 @@
       'share.requiredDesc': '此端口为只读分享专用端口，需要通过有效的分享链接才能访问配置内容。',
       'share.created': '已生成只读分享链接',
       'share.copyDone': '链接已复制',
-      /* 顺手补（2026-09-15）：main.js:979 引用了 share.copyFail，但词典里一直只有
+      /* 顺手补（2026-09-15）：旧版面板引用了 share.copyFail，但词典里一直只有
        * contact./url./host. 三份 copyFail —— 于是分享弹窗复制失败时会把 "share.copyFail"
        * 这个键本身漏到界面上。这正是本工程记过的同类坑（漏 en / 漏键都会漏出 key）。 */
       'share.copyFail': '复制失败，请手动选中',
@@ -793,6 +796,7 @@
       'log.reqBody': 'Request body',
       'log.respBody': 'Response body',
       'log.emptyBody': '(empty)',
+      'log.truncated': 'Over the size limit: only the first part is kept in the log. The body returned to the caller is complete.',
       'log.onlyThisApi': 'Current API only',
       'log.onlyThisApiTitle': 'Show log entries of the currently selected API only',
       'log.filteredEmpty': 'No requests for this API yet.<br>Switch back to All to see other APIs.',
@@ -859,9 +863,9 @@
       'resp.status': 'HTTP status',
       'resp.delay': 'Delay (ms)',
       'resp.delayMax': 'Max delay',
-      'resp.delayRangeTip': 'When max > delay, each request waits a random value in between (e.g. 200~600 to mimic jitter). Use 0 or leave empty for a fixed delay.',
+      'resp.delayRangeTip': 'When max > delay, each request waits a random value in between (e.g. 200~600 to mimic jitter). Use 0 or leave empty for a fixed delay. A single request holds for at most 30 seconds; anything above is capped.',
       'resp.fault': 'Fault injection',
-      'resp.faultHint': 'Simulates upstream failures so callers can be checked for timeouts and error handling. Applies to real calls; "Send a shot" only reports it.',
+      'resp.faultHint': 'Simulates upstream failures so callers can be checked for timeouts and error handling. Applies to real calls; "Send a shot" only reports it. Delay and timeout both hold a connection — past 50 held at once, the extra requests get a 503 instead of queueing.',
       'resp.faultNone': 'Off',
       'resp.faultTimeout': 'Hang (no response)',
       'resp.faultMalformed': 'Truncated body (broken JSON)',
@@ -974,6 +978,8 @@
       'rule.condPath': '?',
       'offline.toast': 'Offline preview; changes not saved',
       'save.fail': 'Save failed: {msg}',
+      'save.conflict': 'Save conflict: {msg}',
+      'save.unknown': 'Unknown error',
       'login.expired': 'Not logged in or session expired',
       'url.copyFail': 'Copy failed, please select manually',
       'url.copied': 'Full URL copied: {url}',
@@ -1149,7 +1155,7 @@
       node.setAttribute('placeholder', t(node.getAttribute('data-i18n-placeholder')));
     });
     /* value：只给「预填了默认文案、且还没被用户改过」的输入框挂（如新建规则的规则名）。
-     * 用户一改，main.js 会把该属性摘掉，所以不会覆盖用户输入。 */
+     * 用户一改，drawer.js 会把该属性摘掉，所以不会覆盖用户输入。 */
     base.querySelectorAll('[data-i18n-value]').forEach((node) => {
       node.value = t(node.getAttribute('data-i18n-value'));
     });

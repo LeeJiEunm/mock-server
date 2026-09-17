@@ -6,9 +6,9 @@ One configuration can host interfaces for multiple upstream services; **a single
 
 Zero dependencies (Node built-in modules only), single process, change rules without restarting.
 
-![Console overview](docs/shot-console.png)
+![Console overview](docs/shot-console.en.png)
 
-<p align="center"><sub>Console overview: left (interface list) · middle (rule editor + try-once) · right (live request logs) ｜ <a href="docs/shot-share.png">share-link dialog</a> ｜ <a href="docs/shot-help.png">web manual</a></sub></p>
+<p align="center"><sub>Console overview: left (interface list) · middle (rule editor + try-once) · right (live request logs) ｜ <a href="docs/shot-share.en.png">share-link dialog</a> ｜ <a href="docs/shot-help.en.png">web manual</a></sub></p>
 
 ---
 
@@ -35,7 +35,7 @@ cd mock-server && node server.js     # console at http://127.0.0.1:18080/
 
 | Doc | Reader |
 | --- | --- |
-| [docs/操作手册.md](docs/操作手册.md) | Testers / integration colleagues: task-oriented quick reference (deploy modes, share links, user mgmt, FAQ) |
+| [docs/操作手册.en.md](docs/操作手册.en.md) | Testers / integration colleagues: task-oriented quick reference (deploy modes, share links, user mgmt, FAQ) |
 | Console top-bar ❓ icon ([`public/help.html`](public/help.html)) | Everyone: web illustrated guide, also visible in read-only share view |
 | This README | Deployers / maintainers: full rule syntax, deploy forms, admin API |
 
@@ -82,6 +82,7 @@ These are the "you'll get burned without reading" items — skim them before dep
 6. **Static assets only match root / `styles/` / `scripts/` / files with extensions like `.css .js .json .ico .png .svg`**; everything else is treated as a mock interface. So mock interface paths **must not carry static suffixes** (`/demo/query.json` would be treated as a static file).
 7. Logs are in memory, cleared on restart, default 200 entries (`config.json` `logSize`).
 8. Browser auto-requests `favicon.ico`, `/.well-known/*` **are not logged**; only real business calls appear.
+9. **Interfaces on the same path can be split by HTTP method.** A `method` of `ALL` or an empty value matches any method; `GET` / `POST` etc. match only requests with that method. For the same path and method, first defined still wins.
 
 ---
 
@@ -104,6 +105,11 @@ After start:
 
 - Console: http://127.0.0.1:18080/
 - Mock entry: http://127.0.0.1:18080/{module}/{interface-path}
+
+> If `config.json` is missing, the server copies `config.example.json` on first start —
+> so a fresh clone runs with a plain `node server.js`, no manual setup.
+> `config.json` is **runtime data** (everything you configure in the UI lives there) and is
+> listed in `.gitignore`, so it is never committed.
 
 > On macOS the upstream address is often `http://127.0.0.1:18080/demo`; do not end the URL with `/`.
 
@@ -163,7 +169,7 @@ MOCK_ADMIN_USER=zhangsan MOCK_ADMIN_PASS=secret node server.js
 
 **Option 2: multiple accounts in `config.json` (one per teammate)**
 
-Passwords are stored as SHA-256 hashes only — use the bundled script to manage them:
+Passwords are stored as scrypt hashes with a per-user random salt — use the bundled script to manage them:
 
 ```bash
 node tools/add-user.js zhangsan secret     # add user / change password
@@ -171,14 +177,16 @@ node tools/add-user.js --list              # list accounts
 node tools/add-user.js --remove zhangsan   # remove a user
 ```
 
-Equivalent to editing the config by hand (`node tools/gen-pass.js yourpassword` prints the hash):
+Equivalent to editing the config by hand (`node tools/gen-pass.js yourpassword` prints the hash, format `scrypt:<salt>:<derived>` with a per-user random salt):
 
 ```json
 { "users": [
-  { "username": "zhangsan", "passwordHash": "sha256:xxxx" },
-  { "username": "lisi",     "passwordHash": "sha256:yyyy" }
+  { "username": "zhangsan", "passwordHash": "scrypt:<saltB64>:<derivedB64>" },
+  { "username": "lisi",     "passwordHash": "scrypt:<saltB64>:<derivedB64>" }
 ] }
 ```
+
+> Legacy `sha256:<hex>` entries from old configs still verify (migration period), but new passwords always use scrypt + a random salt to resist offline cracking.
 
 Changes are hot-reloaded; no restart required.
 
@@ -284,7 +292,7 @@ cd mock-server
 
 - Not setting `MOCK_ADMIN_PASS` = passwordless: the main-port console is open to anyone and anyone can edit rules — fine for internal integration, **do not put it on the public Internet**.
 - With `-r 18081` the script automatically: writes `Environment=READONLY_PORT=18081` into the systemd unit (or the launch command in plain / docker mode), covers both ports in the occupancy check, and opens both `18080` and `18081` in the firewall.
-- On the read-only port `18081`: `/login` is disabled, any non-GET write returns 403, and without a valid `?share=` the page shows "valid share link required".
+- On the read-only port `18081`: `/login` is disabled and any non-GET write returns 403; **every admin endpoint except `/_admin/auth` requires a valid share link** — hitting `/_admin/config`, `/_admin/share`, `/_admin/logs` etc. without a token returns 403 (enforced by the server, not just a front-end prompt), and the page shows "valid share link required".
 - After generating a share link, the URL looks like `http://<HOST_IP>:18081/?share=shr-xxxx` — even if the other party strips `?share=`, it's still a read-only page and nothing can be changed.
 - Security boundary: this isolation **only protects the share link**. The `18080` main port is unprotected; tighten it with the firewall to your own / internal subnet, and open `18081` only to testers.
 
@@ -318,7 +326,7 @@ The 7 automatic steps:
 | 1 | Probe | Find remote node absolute path & version, detect systemd / docker |
 | 2 | Stop old | Stop any running old instance on upgrade to avoid port conflict |
 | 3 | Check port | Fail loudly if the port is taken; never silently hijack |
-| 4 | Upload | `server.js` + `public/` + `tools/`; `config.json` kept by default (your rules) |
+| 4 | Upload | `server.js` + `public/` + `tools/` + `config.example.json`; `config.json` kept by default (your rules). If you have no local `config.json` yet, the script ships `config.example.json` instead |
 | 5 | Install | Generate systemd unit from real paths and `enable --now` |
 | 6 | Health | Hit `/_admin/health`; **200 or 401 both count as ready** (401 = login protection on); print diagnostics on failure |
 | 7 | Firewall | Open port if firewalld is active, else skip |
@@ -359,9 +367,9 @@ REMOTE
 Without the script, fill the 4 placeholders in `mock-server.service` and push it to the target:
 
 ```bash
-# 1) Upload files
+# 1) Upload files (ship config.example.json when you have no local config.json — the server copies it on first start)
 ssh <user>@<HOST_IP> 'mkdir -p /opt/mock-server'
-scp -r server.js config.json public <user>@<HOST_IP>:/opt/mock-server/
+scp -r server.js config.example.json public <user>@<HOST_IP>:/opt/mock-server/
 
 # 2) Find node absolute path (write into the service file, don't copy /usr/bin/node blindly)
 ssh <user>@<HOST_IP> 'command -v node'
@@ -379,7 +387,8 @@ ssh <user>@<HOST_IP> 'sudo systemctl daemon-reload && sudo systemctl enable --no
 Host only needs docker + compose; no Node required:
 
 ```bash
-# On the host (ensure config.json already exists on the host, or docker mounts a dir over the file)
+# On the host. config.json is the volume-mount target and must exist first, otherwise
+# docker mounts a directory over that path:  cp config.example.json config.json
 MOCK_PORT=18080 docker compose up -d --build
 ```
 
@@ -518,9 +527,19 @@ Multiple conditions combine via "**all / any**".
 | Item | Notes |
 | --- | --- |
 | HTTP status | any code, for error branches (500 / 502 / 404…) |
-| Delay | ms, for timeout / loading / retry |
+| Delay | ms, for timeout / loading / retry. **A single request holds for at most 30 seconds** — anything larger is capped at 30s (`MOCK_MAX_DELAY_MS` to change it) |
 | Content-Type | default `application/json;charset=UTF-8` |
 | Mode | **static text** or **script** |
+
+> Both a delay and the `timeout` fault hold a connection open. Past 50 requests held at once, the
+> extra ones get a **503** instead of queueing (the message names the reason), so the process cannot
+> run out of file descriptors and take the admin UI down with it. Tune with `MOCK_MAX_HELD_REQUESTS`.
+
+> The request log keeps only a **copy** of each body, at most **100KB** per entry: beyond that the
+> text keeps the first 100KB and states the original size at the end, and the log entry carries
+> `reqBodyTruncated` / `respBodyTruncated` (`{kept, total}`) — the detail drawer says so in plain
+> words. **The body returned to the caller is always complete**; truncation only affects the log,
+> never proxy pass-through. Tune with `MOCK_LOG_BODY_LIMIT` (bytes; 0 disables truncation).
 
 **Static text** supports variable substitution:
 
@@ -549,6 +568,8 @@ return {
 ```
 
 A script error returns 500 with the error in the body for easy debugging.
+
+Scripts run synchronously in a vm sandbox: 1s timeout and 64KB length cap by default (`MOCK_SCRIPT_TIMEOUT_MS` / `MOCK_SCRIPT_MAX_LEN`), so an infinite loop or oversized script returns 500 instead of freezing the whole server.
 
 ### Interface-level variables
 
@@ -612,10 +633,11 @@ Top-bar **share icon** → "generate share link". Each link has a **copy icon** 
 
 - The other party can only view rules, **cannot change config** (the server also blocks writes as a backstop);
 - After a link is revoked, opening it shows a "share link expired" page — it never degrades to an editable view;
-- With `READONLY_PORT` (read-only isolation port) configured at deploy, the share link uses a separate port — **stripping `?share=` still leaves it read-only**. Passwordless deploy must configure it or clicking "generate" returns 403.
+- With `READONLY_PORT` (read-only isolation port) configured at deploy, the share link uses a separate port — **stripping `?share=` no longer even reads the config, let alone edits it** (that port requires a token on every endpoint except `/_admin/auth`, enforced by the server). Passwordless deploy must configure it or clicking "generate" returns 403.
 - Just add it to the one-click deploy: `./deploy.sh <user>@<HOST_IP> -r 18081` (see 5.2). Link looks like `http://<HOST_IP>:18081/?share=shr-xxxx`; on the read-only port `/login` is disabled and writes return 403.
+- A read-only identity (share link or read-only port) only ever sees the rules themselves: `/_admin/config` has `users` and `shareTokens` stripped, and the token list `/_admin/share` is open to editable identities only — holding one share link is not the same as holding every link and every account hash.
 
-![Share-link dialog](docs/shot-share.png)
+![Share-link dialog](docs/shot-share.en.png)
 
 ### Login & user management
 
@@ -640,10 +662,10 @@ The ❓ next to the share icon opens the web manual (`public/help.html`) in a ne
 | GET | `/_admin/health` | health (apis / groups / rules / uptime) |
 | GET | `/_admin/auth` | auth state (whether login required, read-only share, share token expired) |
 | POST | `/_admin/login` | login (body: `{username, password}`, returns session token) |
-| GET | `/_admin/config` | read full config (incl. `groups`) |
-| POST | `/_admin/config` | save full config (body is the config JSON) |
+| GET | `/_admin/config` | read full config (incl. `groups`; **`users` / `shareTokens` are never sent**, not even to a read-only identity) |
+| POST | `/_admin/config` | save full config (body is the config JSON; `users` / `shareTokens` are preserved server-side, safe to omit) |
 | POST | `/_admin/reload` | re-read `config.json` from disk |
-| GET / POST / DELETE | `/_admin/share` | read-only share links: list / generate / revoke (`?token=`) |
+| GET / POST / DELETE | `/_admin/share` | read-only share links: list / generate / revoke (`?token=`; **listing is for editable identities only** — a share token or the read-only port gets 403) |
 | GET / POST / DELETE | `/_admin/users` | login user management (deploy admin only) |
 | GET | `/_admin/logs?limit=50` | recent request logs |
 | POST | `/_admin/logs/clear` | clear logs |
@@ -716,27 +738,47 @@ Two top-bar entries read their values from the `meta` field at the top of `confi
 ```
 mock-server/
 ├── server.js              # service (zero deps)
-├── config.json            # interface & rule config (single source of truth, desensitized to examples)
+├── config.example.json    # example config (**tracked**): copied on first start when config.json is missing
+├── config.json            # interface & rule config (single source of truth; runtime data, **not tracked**)
 ├── public/
 │   ├── index.html         # console page (CSS/JS use relative paths)
 │   ├── help.html          # web manual (top-bar ❓; single-file, self-styled, no deps)
-│   ├── help/              # manual screenshots (shot-console / shot-share)
+│   ├── help/              # manual screenshots (shot-console / shot-share; .en.png = English)
 │   ├── styles/
 │   │   ├── tokens.css     # design tokens: color, type scale, spacing, theme (dark/light)
 │   │   ├── base.css       # reset, typography, focus, ambiance, motion fallback
 │   │   └── components.css # components & layout
-│   ├── scripts/main.js    # console logic (vanilla JS, no framework)
+│   ├── scripts/           # console logic (vanilla JS, no framework, no build; split by feature,
+│   │   │                  # loaded in order by index.html, sharing one global scope — order matters)
+│   │   ├── i18n.js        # zh/en copy and multilingual rendering
+│   │   ├── state.js       # global state, constants, local preferences
+│   │   ├── core.js        # helpers, sample config & API templates, config I/O
+│   │   ├── theme.js       # theme and sidebar collapse
+│   │   ├── auth.js        # login state, read-only sharing, share links, user menu
+│   │   ├── api-list.js    # topbar stats, left API list and focus
+│   │   ├── groups.js      # generic dialogs and group management
+│   │   ├── workspace.js   # workspace and read-only detail
+│   │   ├── try-logs.js    # try-it, changelog, request logs
+│   │   ├── drawer.js      # API / rule drawer
+│   │   └── app.js         # render entry, event binding, batch mode, boot
 │   └── sample-config.json # example config for offline preview only; not read at runtime
 ├── docs/
-│   ├── 操作手册.md         # task-oriented quick reference (testers / integration)
-│   └── shot-*.png         # screenshots for README and the manual
-├── tools/                 # helper scripts, not deployed
+│   ├── 操作手册.en.md     # task-oriented quick reference (testers / integration, English)
+│   └── shot-*.png         # screenshots for README and the manual (shot-*.en.png = English)
+├── tools/                 # helper scripts, not deployed (server.js runs standalone and never requires them)
+│   ├── lib/config.js      # shared by tools: locate the config file / seed it from the example
+│   ├── lib/cdp.js         # shared by tools: launch headless Chrome / attach DevTools / screenshot / collect page JS errors
+│   ├── lib/sandbox.js     # shared by tools: spin up an isolated copy in a temp dir to run self-checks (never touches the repo config.json)
 │   ├── import-legacy.js   # import from legacy mock platform (idempotent, repeatable)
 │   ├── add-user.js        # add/update/remove console login users (writes config.json users)
-│   ├── gen-pass.js        # generate the SHA-256 hash of a password
+│   ├── gen-pass.js        # generate a password hash (scrypt, per-user random salt; format scrypt:<salt>:<derived>)
 │   ├── verify-ui.js       # real-browser self-check: try-once / theme / type scale / contrast / narrow screen
 │   ├── verify-login.js    # real-browser self-check: login wording / input not wiped / login boundary
 │   ├── verify-docs.js     # doc-parity self-check: both READMEs must share the same section markers
+│   ├── verify-server-basics.js # server-basics self-check: startup with missing/broken config.json, static-dir traversal guard
+│   ├── verify-auth-security.js # auth self-check: login boundary / read-only share tokens / sessions
+│   ├── verify-mock-limits.js   # limits self-check: request-body size, rule count and other caps really take effect
+│   ├── verify-console-boot.js  # real-browser self-check: script assembly + zero boot errors + cross-file calls + interactions & language switch
 │   └── verify-deploy.sh  # deploy-script local sandbox: fake ssh, asserts readonly port etc. land in remote config
 ├── Dockerfile
 ├── docker-compose.yml
@@ -766,6 +808,12 @@ node tools/verify-login.js http://127.0.0.1:18080/ admin admin123
 ```
 
 It asserts 30 checks: CN/EN login wording (catching raw keys like `login.username` leaking into the UI), input not wiped and focus not stolen while typing, the wrong-password message plus "clear password, keep username", successful entry into the console, and mock APIs staying reachable without a login.
+
+All self-checks can be run in one pass (each spins up its own sandbox, never touches the repo `config.json`, and needs no pre-started server):
+
+```bash
+npm run verify:all      # docs → core → auth → limits → basics → console
+```
 
 ---
 

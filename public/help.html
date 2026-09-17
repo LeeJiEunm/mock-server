@@ -3,7 +3,7 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>Mock Server · 操作手册</title>
+<title>Mock Server · 操作手册 / Guide</title>
 <style>
   /* 自包含样式，无外部依赖；配色取向与控制台一致（暖白底 + 橙色强调） */
   :root {
@@ -66,146 +66,216 @@
   }
   footer { text-align: center; color: var(--muted); font-size: 13px; margin-top: 30px; }
   @media (max-width: 860px) { .layout { flex-direction: column; } nav { position: static; width: 100%; } }
+
+  /* ---- bilingual switching ---- */
+  html:lang(en) .zh { display: none; }
+  html:lang(zh) .en { display: none; }
+  .lang-switch { display: flex; gap: 6px; margin-top: 16px; padding: 0 14px; }
+  .lang-switch button {
+    flex: 1; padding: 6px 0; border: 1px solid var(--line); background: var(--card);
+    border-radius: 8px; cursor: pointer; font-size: 13px; color: var(--text);
+  }
+  .lang-switch button.active { background: var(--accent-soft); color: var(--accent); border-color: var(--accent); font-weight: 600; }
 </style>
 </head>
 <body>
 <div class="layout">
 
   <nav>
-    <div class="brand">📘 操作手册</div>
-    <a href="#start">一、快速上手</a>
-    <a href="#tour">二、界面导览</a>
-    <a href="#rules">三、配置挡板规则</a>
-    <a href="#try">四、试打一枪</a>
-    <a href="#logs">五、查看请求日志</a>
-    <a href="#share">六、分享链接给同事</a>
-    <a href="#login">七、登录与账号</a>
-    <a href="#faq">八、常见问题</a>
+    <div class="brand"><span class="zh">📘 操作手册</span><span class="en">📘 Guide</span></div>
+    <a href="#start"><span class="zh">一、快速上手</span><span class="en">1. Quick start</span></a>
+    <a href="#tour"><span class="zh">二、界面导览</span><span class="en">2. Console tour</span></a>
+    <a href="#rules"><span class="zh">三、配置挡板规则</span><span class="en">3. Configure rules</span></a>
+    <a href="#try"><span class="zh">四、试打一枪</span><span class="en">4. Try a shot</span></a>
+    <a href="#logs"><span class="zh">五、查看请求日志</span><span class="en">5. Request logs</span></a>
+    <a href="#share"><span class="zh">六、分享链接给同事</span><span class="en">6. Share link</span></a>
+    <a href="#login"><span class="zh">七、登录与账号</span><span class="en">7. Login &amp; accounts</span></a>
+    <a href="#faq"><span class="zh">八、常见问题</span><span class="en">8. FAQ</span></a>
+    <div class="lang-switch">
+      <button type="button" data-lang="zh">中文</button>
+      <button type="button" data-lang="en">EN</button>
+    </div>
   </nav>
 
   <main>
     <header class="hero">
-      <h1>Mock Server 操作手册</h1>
-      <p>给测试 / 联调同事的快速上手指南 —— 5 分钟学会用挡板接口代替真实上游做联调。</p>
+      <h1><span class="zh">Mock Server 操作手册</span><span class="en">Mock Server Guide</span></h1>
+      <p><span class="zh">给测试 / 联调同事的快速上手指南 —— 5 分钟学会用挡板接口代替真实上游做联调。</span><span class="en">A 5-minute quick-start for testers / integration colleagues: learn to use mock endpoints instead of the real upstream for joint debugging.</span></p>
     </header>
 
     <!-- ====================== 一、快速上手 ====================== -->
     <section id="start">
-      <h2><span class="no">01</span>快速上手</h2>
-      <p>这是一个<b>可配置的假接口（挡板 / mock）服务</b>：被测系统不连真实上游，改连这里，就能按你配的规则返回成功、失败、超时等各种场景。</p>
+      <h2><span class="no">01</span><span class="zh">快速上手</span><span class="en">Quick start</span></h2>
+      <p><span class="zh">这是一个<b>可配置的假接口（挡板 / mock）服务</b>：被测系统不连真实上游，改连这里，就能按你配的规则返回成功、失败、超时等各种场景。</span><span class="en">This is a <b>configurable fake-endpoint (mock) service</b>: instead of hitting the real upstream, point the system-under-test here and it returns success / failure / timeout scenarios per your rules.</span></p>
       <ol>
-        <li>浏览器打开管理界面：<code>http://&lt;挡板机IP&gt;:18080/</code>（有账号就先登录）；</li>
-        <li>左栏找到目标接口（或新建成一个，见<a href="#rules">第三节</a>）；</li>
-        <li>把<b>被测系统的上游地址</b>改成挡板地址：<code>http://&lt;挡板机IP&gt;:18080</code>（结尾不要带 <code>/</code>）；</li>
-        <li>被测系统正常发起调用 → 右栏日志立刻能看到每次请求和返回；</li>
-        <li>要改返回内容？中栏改规则、保存，<b>立即生效，不用重启</b>。</li>
+        <li><span class="zh">浏览器打开管理界面：<code>http://&lt;挡板机IP&gt;:18080/</code>（有账号就先登录）；</span><span class="en">Open the console in a browser: <code>http://&lt;mock-server IP&gt;:18080/</code> (log in first if accounts are enabled);</span></li>
+        <li><span class="zh">左栏找到目标接口（或新建成一个，见<a href="#rules">第三节</a>）；</span><span class="en">In the left panel find the target API (or create one — see <a href="#rules">section 3</a>);</span></li>
+        <li><span class="zh">把<b>被测系统的上游地址</b>改成挡板地址：<code>http://&lt;挡板机IP&gt;:18080</code>（结尾不要带 <code>/</code>）；</span><span class="en">Change the <b>system-under-test's upstream URL</b> to the mock address: <code>http://&lt;mock-server IP&gt;:18080</code> (no trailing <code>/</code>);</span></li>
+        <li><span class="zh">被测系统正常发起调用 → 右栏日志立刻能看到每次请求和返回；</span><span class="en">The system-under-test calls normally → the right panel logs every request and response instantly;</span></li>
+        <li><span class="zh">要改返回内容？中栏改规则、保存，<b>立即生效，不用重启</b>。</span><span class="en">Need to change the response? Edit the rule in the middle panel and save — <b>it takes effect immediately, no restart needed</b>.</span></li>
       </ol>
-      <div class="tip"><b>调用规则：</b>挡板地址 = 根地址 + <code>/模块/接口路径</code>。比如接口配的是模块 <code>demo</code>、路径 <code>sample</code>，完整调用地址就是 <code>http://127.0.0.1:18080/demo/sample</code>。点接口卡片上的调用地址条可直接复制。</div>
+      <div class="tip"><b><span class="zh">调用规则：</span><span class="en">Call pattern: </span></b><span class="zh">挡板地址 = 根地址 + <code>/模块/接口路径</code>。比如接口配的是模块 <code>demo</code>、路径 <code>sample</code>，完整调用地址就是 <code>http://127.0.0.1:18080/demo/sample</code>。点接口卡片上的调用地址条可直接复制。</span><span class="en">mock address = base URL + <code>/module/api-path</code>. E.g. module <code>demo</code>, path <code>sample</code> → full URL <code>http://127.0.0.1:18080/demo/sample</code>. Click the address bar on the API card to copy it.</span></div>
     </section>
 
     <!-- ====================== 二、界面导览 ====================== -->
     <section id="tour">
-      <h2><span class="no">02</span>界面导览</h2>
+      <h2><span class="no">02</span><span class="zh">界面导览</span><span class="en">Console tour</span></h2>
       <figure>
-        <img class="shot" src="help/shot-console.png" alt="控制台总览">
-        <figcaption>控制台总览：左（接口列表）· 中（规则编排）· 右（实时请求日志）</figcaption>
+        <img class="shot zh" src="help/shot-console.png" alt="控制台总览">
+        <img class="shot en" src="help/shot-console.en.png" alt="Console overview">
+        <figcaption><span class="zh">控制台总览：左（接口列表）· 中（规则编排）· 右（实时请求日志）</span><span class="en">Console overview: left (API list) · middle (rule editor) · right (live request log)</span></figcaption>
       </figure>
       <table>
-        <tr><th>区域</th><th>是什么</th><th>常用操作</th></tr>
-        <tr><td><b>左栏</b></td><td>接口列表，按分组归拢</td><td>新建分组 / 接口；开关接口；搜索过滤；编辑 / 删除</td></tr>
-        <tr><td><b>中栏</b></td><td>当前接口的规则编排 + 试打</td><td>加规则、调顺序（↑↓）、编辑接口、看变更记录</td></tr>
-        <tr><td><b>右栏</b></td><td>实时请求日志</td><td>自动刷新；只看当前接口；点条目看请求 / 返回详情</td></tr>
-        <tr><td><b>顶栏</b></td><td>全局动作与入口</td><td>分享、帮助（本页）、联系维护者、根地址、语言、GitHub、主题、重读配置、导出 / 导入</td></tr>
+        <tr><th><span class="zh">区域</span><span class="en">Area</span></th><th><span class="zh">是什么</span><span class="en">What it is</span></th><th><span class="zh">常用操作</span><span class="en">Common actions</span></th></tr>
+        <tr><td><b><span class="zh">左栏</span><span class="en">Left</span></b></td><td><span class="zh">接口列表，按分组归拢</span><span class="en">API list grouped by category</span></td><td><span class="zh">新建分组 / 接口；开关接口；搜索过滤；编辑 / 删除</span><span class="en">New group / API; toggle API; search &amp; filter; edit / delete</span></td></tr>
+        <tr><td><b><span class="zh">中栏</span><span class="en">Middle</span></b></td><td><span class="zh">当前接口的规则编排 + 试打</span><span class="en">Rule editor + try-once for the current API</span></td><td><span class="zh">加规则、调顺序（↑↓）、编辑接口、看变更记录</span><span class="en">Add rules, reorder (↑↓), edit API, view change history</span></td></tr>
+        <tr><td><b><span class="zh">右栏</span><span class="en">Right</span></b></td><td><span class="zh">实时请求日志</span><span class="en">Live request log</span></td><td><span class="zh">自动刷新；只看当前接口；点条目看请求 / 返回详情</span><span class="en">Auto-refresh; current-API-only; click an entry for request / response details</span></td></tr>
+        <tr><td><b><span class="zh">顶栏</span><span class="en">Top bar</span></b></td><td><span class="zh">全局动作与入口</span><span class="en">Global actions &amp; entries</span></td><td><span class="zh">分享、帮助（本页）、联系维护者、根地址、语言、GitHub、主题、重读配置、导出 / 导入</span><span class="en">Share, help (this page), contact maintainer, base URL, language, GitHub, theme, reload config, export / import</span></td></tr>
       </table>
-      <p>顶栏左侧的 <b>接口 / 规则 / 运行时长</b> 是服务健康概览；绿色「运行中」表示与服务的连接正常。</p>
+      <p><span class="zh">顶栏左侧的 <b>接口 / 规则 / 运行时长</b> 是服务健康概览；绿色「运行中」表示与服务的连接正常。</span><span class="en">The <b>APIs / rules / uptime</b> on the left of the top bar is a service-health overview; a green "Running" means the console is connected to the server.</span></p>
     </section>
 
     <!-- ====================== 三、配置挡板规则 ====================== -->
     <section id="rules">
-      <h2><span class="no">03</span>配置挡板规则</h2>
-      <h3>3.1 新建接口</h3>
-      <p>左栏「+ 分组」建个分组（只影响列表归类，不影响路径）→「+ 接口」填名称、模块、路径，下方会实时预览调用地址。</p>
-      <h3>3.2 一条规则 = 条件 + 响应</h3>
-      <p>中栏「+ 新增规则」。规则自上而下匹配，<b>命中即停</b>，所以宽泛的条件放下面、具体的放上面（可拖拽调整）。</p>
+      <h2><span class="no">03</span><span class="zh">配置挡板规则</span><span class="en">Configure mock rules</span></h2>
+      <h3><span class="zh">3.1 新建接口</span><span class="en">3.1 Create an API</span></h3>
+      <p><span class="zh">左栏「+ 分组」建个分组（只影响列表归类，不影响路径）→「+ 接口」填名称、模块、路径，下方会实时预览调用地址。</span><span class="en">In the left panel click "+ group" to create a group (affects listing only, not the path) → "+ API" to enter name, module, path; the call URL previews live below.</span></p>
+      <h3><span class="zh">3.2 一条规则 = 条件 + 响应</span><span class="en">3.2 A rule = condition + response</span></h3>
+      <p><span class="zh">中栏「+ 新增规则」。规则自上而下匹配，<b>命中即停</b>，所以宽泛的条件放下面、具体的放上面（可拖拽调整）。</span><span class="en">In the middle panel click "+ new rule". Rules match top-down and <b>stop at first hit</b>, so put broad conditions lower and specific ones higher (drag to reorder).</span></p>
       <table>
-        <tr><th>要模拟什么</th><th>怎么配</th></tr>
-        <tr><td>按请求字段返回不同结果</td><td>条件：请求体 <code>code</code> = <code>500</code> → 响应状态码 500</td></tr>
-        <tr><td>模拟超时 / 慢接口</td><td>响应里加延迟（如 3000ms）</td></tr>
-        <tr><td>模拟业务失败</td><td>响应里自定义状态码 + 报文（如 <code>{"success":false}</code>）</td></tr>
-        <tr><td>原样回显（验联通）</td><td>用「回显」模板建接口，收到什么原样返回</td></tr>
-        <tr><td>部分真实 + 部分挡板</td><td>接口设置里配「代理回源」真实服务地址</td></tr>
-        <tr><td>数组逐项不同返回</td><td>脚本响应模式（进阶，见 README 第七章）</td></tr>
+        <tr><th><span class="zh">要模拟什么</span><span class="en">Scenario</span></th><th><span class="zh">怎么配</span><span class="en">How to set it up</span></th></tr>
+        <tr><td><span class="zh">按请求字段返回不同结果</span><span class="en">Different result by request field</span></td><td><span class="zh">条件：请求体 <code>code</code> = <code>500</code> → 响应状态码 500</span><span class="en">Condition: request body <code>code</code> = <code>500</code> → response status 500</span></td></tr>
+        <tr><td><span class="zh">模拟超时 / 慢接口</span><span class="en">Simulate timeout / slow API</span></td><td><span class="zh">响应里加延迟（如 3000ms）</span><span class="en">Add a delay to the response (e.g. 3000ms)</span></td></tr>
+        <tr><td><span class="zh">模拟业务失败</span><span class="en">Simulate a business failure</span></td><td><span class="zh">响应里自定义状态码 + 报文（如 <code>{"success":false}</code>）</span><span class="en">Custom status code + body (e.g. <code>{"success":false}</code>)</span></td></tr>
+        <tr><td><span class="zh">原样回显（验联通）</span><span class="en">Echo back (connectivity check)</span></td><td><span class="zh">用「回显」模板建接口，收到什么原样返回</span><span class="en">Create an API with the "echo" template; it returns whatever it receives</span></td></tr>
+        <tr><td><span class="zh">部分真实 + 部分挡板</span><span class="en">Partly real + partly mock</span></td><td><span class="zh">接口设置里配「代理回源」真实服务地址</span><span class="en">Set "proxy to upstream" with the real service URL in API settings</span></td></tr>
+        <tr><td><span class="zh">数组逐项不同返回</span><span class="en">Different response per array item</span></td><td><span class="zh">脚本响应模式（进阶，见 README 第七章）</span><span class="en">Scripted-response mode (advanced — see README chapter 7)</span></td></tr>
       </table>
-      <div class="tip"><b>必配兜底：</b>所有条件都不命中时返回的「兜底响应」。漏配的话，未命中请求会拿到 404，排查时容易误判。</div>
+      <div class="tip"><b><span class="zh">必配兜底：</span><span class="en">Always set a fallback: </span></b><span class="zh">所有条件都不命中时返回的「兜底响应」。漏配的话，未命中请求会拿到 404，排查时容易误判。</span><span class="en">the "fallback response" returned when no rule matches. Without it, unmatched requests get 404, which is easy to misread during debugging.</span></div>
     </section>
 
     <!-- ====================== 四、试打一枪 ====================== -->
     <section id="try">
-      <h2><span class="no">04</span>试打一枪</h2>
-      <p>中栏「试打一枪」：填请求体 / 参数 / 请求头 → 点「发送」，<b>不经过网络</b>，直接按当前规则判定：</p>
+      <h2><span class="no">04</span><span class="zh">试打一枪</span><span class="en">Try a shot</span></h2>
+      <p><span class="zh">中栏「试打一枪」：填请求体 / 参数 / 请求头 → 点「发送」，<b>不经过网络</b>，直接按当前规则判定：</span><span class="en">Middle panel "try a shot": fill request body / params / headers → click "send"; <b>no network involved</b> — it evaluates against the current rules directly:</span></p>
       <ul>
-        <li>右侧列出每条规则命中还是跳过、原因是什么，命中的高亮；</li>
-        <li>直接给出将返回的内容，配错当场就能发现；</li>
-        <li>试打会记一条带「试打」标签的日志，方便和真实流量对照。</li>
+        <li><span class="zh">右侧列出每条规则命中还是跳过、原因是什么，命中的高亮；</span><span class="en">The right side lists each rule as hit or skipped and why; the matched one is highlighted;</span></li>
+        <li><span class="zh">直接给出将返回的内容，配错当场就能发现；</span><span class="en">It shows exactly what would be returned, so misconfig is caught on the spot;</span></li>
+        <li><span class="zh">试打会记一条带「试打」标签的日志，方便和真实流量对照。</span><span class="en">A try-once entry tagged "try-once" is logged, handy to compare with real traffic.</span></li>
       </ul>
-      <p><b>推荐顺序：</b>配完规则 → 先试打自证 → 再让被测系统连上来。</p>
+      <p><b><span class="zh">推荐顺序：</span><span class="en">Recommended order: </span></b><span class="zh">配完规则 → 先试打自证 → 再让被测系统连上来。</span><span class="en">configure rules → try a shot to self-verify → then connect the system-under-test.</span></p>
     </section>
 
     <!-- ====================== 五、查看请求日志 ====================== -->
     <section id="logs">
-      <h2><span class="no">05</span>查看请求日志</h2>
-      <p>右栏每 3 秒自动刷新。每条日志：时间、调用路径、状态码、耗时、命中的规则徽标（如 R1）。</p>
+      <h2><span class="no">05</span><span class="zh">查看请求日志</span><span class="en">Request logs</span></h2>
+      <p><span class="zh">右栏每 3 秒自动刷新。每条日志：时间、调用路径、状态码、耗时、命中的规则徽标（如 R1）。</span><span class="en">The right panel auto-refreshes every 3 seconds. Each log: time, call path, status code, latency, matched-rule badge (e.g. R1).</span></p>
       <table>
-        <tr><th>我想…</th><th>操作</th></tr>
-        <tr><td>只看某个接口的请求</td><td>打开右栏「只看当前接口」开关</td></tr>
-        <tr><td>看请求体 / 返回体详情</td><td>点开那条日志</td></tr>
-        <tr><td>从日志跳到对应规则</td><td>点日志里的规则徽标（R1…），中栏会滚动并高亮</td></tr>
-        <tr><td>暂停自动刷新 / 清空</td><td>右栏第二个开关 / Clear 按钮</td></tr>
+        <tr><th><span class="zh">我想…</span><span class="en">I want to…</span></th><th><span class="zh">操作</span><span class="en">Action</span></th></tr>
+        <tr><td><span class="zh">只看某个接口的请求</span><span class="en">See only one API's requests</span></td><td><span class="zh">打开右栏「只看当前接口」开关</span><span class="en">Toggle "current API only" in the right panel</span></td></tr>
+        <tr><td><span class="zh">看请求体 / 返回体详情</span><span class="en">See request / response body details</span></td><td><span class="zh">点开那条日志</span><span class="en">Expand that log entry</span></td></tr>
+        <tr><td><span class="zh">从日志跳到对应规则</span><span class="en">Jump from a log to its rule</span></td><td><span class="zh">点日志里的规则徽标（R1…），中栏会滚动并高亮</span><span class="en">Click the rule badge (R1…) in the log; the middle panel scrolls and highlights</span></td></tr>
+        <tr><td><span class="zh">暂停自动刷新 / 清空</span><span class="en">Pause auto-refresh / clear</span></td><td><span class="zh">右栏第二个开关 / Clear 按钮</span><span class="en">Second toggle in the right panel / the Clear button</span></td></tr>
       </table>
     </section>
 
     <!-- ====================== 六、分享链接 ====================== -->
     <section id="share">
-      <h2><span class="no">06</span>分享链接给同事</h2>
-      <p>想让别人<b>只看不改</b>地查看规则？顶栏分享图标 → 「生成分享链接」：</p>
+      <h2><span class="no">06</span><span class="zh">分享链接给同事</span><span class="en">Share link with colleagues</span></h2>
+      <p><span class="zh">想让别人<b>只看不改</b>地查看规则？顶栏分享图标 → 「生成分享链接」：</span><span class="en">Want someone to <b>view but not edit</b> the rules? Top-bar share icon → "generate share link":</span></p>
       <figure>
-        <img class="shot" src="help/shot-share.png" alt="分享链接弹窗">
-        <figcaption>分享弹窗：每条链接左侧 📋 图标点击即复制，右侧可随时撤销</figcaption>
+        <img class="shot zh" src="help/shot-share.png" alt="分享链接弹窗">
+        <img class="shot en" src="help/shot-share.en.png" alt="Share-link dialog">
+        <figcaption><span class="zh">分享弹窗：每条链接左侧 📋 图标点击即复制，右侧可随时撤销</span><span class="en">Share dialog: each link has a 📋 icon on the left to copy, and can be revoked anytime on the right</span></figcaption>
       </figure>
       <ul>
-        <li>对方打开链接只能查看规则，<b>改不了配置</b>（服务端同样拦截写请求）；</li>
-        <li>链接可随时撤销，撤销后对方打开会提示"链接已失效"；</li>
-        <li>每条链接可以写备注（比如给谁用的），方便管理。</li>
+        <li><span class="zh">对方打开链接只能查看规则，<b>改不了配置</b>（服务端同样拦截写请求）；</span><span class="en">The recipient can only view the rules, <b>not edit config</b> (the server also blocks writes);</span></li>
+        <li><span class="zh">链接可随时撤销，撤销后对方打开会提示"链接已失效"；</span><span class="en">Links can be revoked anytime; after revoke, opening it shows "link expired";</span></li>
+        <li><span class="zh">每条链接可以写备注（比如给谁用的），方便管理。</span><span class="en">Each link can carry a note (e.g. who it's for) for easy management.</span></li>
       </ul>
-      <div class="tip"><b>只读端口模式（部署选项）：</b>部署时配置 <code>READONLY_PORT</code> 后，分享链接走独立只读端口——对方把链接里的 <code>?share=</code> 去掉也依然只读，安全性最高。</div>
+      <div class="tip"><b><span class="zh">只读端口模式（部署选项）：</span><span class="en">Read-only port mode (deploy option): </span></b><span class="zh">部署时配置 <code>READONLY_PORT</code> 后，分享链接走独立只读端口——对方把链接里的 <code>?share=</code> 去掉也依然只读，安全性最高。</span><span class="en">With <code>READONLY_PORT</code> set at deploy time, share links use a separate read-only port — even if the recipient strips <code>?share=</code> from the URL, it stays read-only, for maximum safety.</span></div>
     </section>
 
     <!-- ====================== 七、登录与账号 ====================== -->
     <section id="login">
-      <h2><span class="no">07</span>登录与账号</h2>
+      <h2><span class="no">07</span><span class="zh">登录与账号</span><span class="en">Login &amp; accounts</span></h2>
       <ul>
-        <li>部署时开启登录保护的话，打开界面先登录；<b>调用挡板接口本身不受登录影响</b>，被测系统照常连；</li>
-        <li>密码忘了找部署同事重置；账号由管理员在头像菜单「Users」里增删；</li>
-        <li>界面语言（中文 / English）在顶栏 🌐 或登录页切换，记住你的选择。</li>
+        <li><span class="zh">部署时开启登录保护的话，打开界面先登录；<b>调用挡板接口本身不受登录影响</b>，被测系统照常连；</span><span class="en">If login protection is enabled at deploy time, log in first when opening the console; <b>calling the mock APIs themselves is unaffected by login</b> — the system-under-test connects as usual;</span></li>
+        <li><span class="zh">密码忘了找部署同事重置；账号由管理员在头像菜单「Users」里增删；</span><span class="en">Forgot your password? Ask the deploy colleague to reset it; admins add/remove accounts in the avatar menu "Users";</span></li>
+        <li><span class="zh">界面语言（中文 / English）在顶栏 🌐 或登录页切换，记住你的选择。</span><span class="en">UI language (中文 / English) switches from the top-bar 🌐 or the login page, and your choice is remembered.</span></li>
       </ul>
     </section>
 
     <!-- ====================== 八、FAQ ====================== -->
     <section id="faq">
-      <h2><span class="no">08</span>常见问题</h2>
+      <h2><span class="no">08</span><span class="zh">常见问题</span><span class="en">FAQ</span></h2>
       <table>
-        <tr><th>现象</th><th>原因与处理</th></tr>
-        <tr><td>被测系统连不上挡板</td><td>检查上游地址写法：<code>http://IP:18080</code>，结尾不带 <code>/</code>；确认挡板服务在跑（顶栏「运行中」）</td></tr>
-        <tr><td>返回 404</td><td>路径写错（模块 / 接口对不上），或该接口没有配「兜底响应」且条件都未命中</td></tr>
-        <tr><td>改了规则没生效</td><td>规则没点保存；或浏览器缓存，<code>Cmd+Shift+R</code> 强刷页面</td></tr>
-        <tr><td>分享链接打不开</td><td>链接被撤销了，找分享的人重新生成</td></tr>
-        <tr><td>想要某个"奇怪"的场景配不出来</td><td>先试打验证条件写法；还不行找维护者（顶栏 ✉）</td></tr>
+        <tr><th><span class="zh">现象</span><span class="en">Symptom</span></th><th><span class="zh">原因与处理</span><span class="en">Cause &amp; fix</span></th></tr>
+        <tr><td><span class="zh">被测系统连不上挡板</span><span class="en">System-under-test can't reach the mock</span></td><td><span class="zh">检查上游地址写法：<code>http://IP:18080</code>，结尾不带 <code>/</code>；确认挡板服务在跑（顶栏「运行中」）</span><span class="en">Check the upstream URL format: <code>http://IP:18080</code>, no trailing <code>/</code>; confirm the mock server is running (top-bar "Running")</span></td></tr>
+        <tr><td><span class="zh">返回 404</span><span class="en">404 returned</span></td><td><span class="zh">路径写错（模块 / 接口对不上），或该接口没有配「兜底响应」且条件都未命中</span><span class="en">Wrong path (module / API mismatch), or the API has no "fallback response" and no rule matched</span></td></tr>
+        <tr><td><span class="zh">改了规则没生效</span><span class="en">Rule change not applied</span></td><td><span class="zh">规则没点保存；或浏览器缓存，<code>Cmd+Shift+R</code> 强刷页面</span><span class="en">Rule not saved; or browser cache — hard-refresh with <code>Cmd+Shift+R</code></span></td></tr>
+        <tr><td><span class="zh">分享链接打不开</span><span class="en">Share link won't open</span></td><td><span class="zh">链接被撤销了，找分享的人重新生成</span><span class="en">The link was revoked; ask the sharer to regenerate</span></td></tr>
+        <tr><td><span class="zh">想要某个"奇怪"的场景配不出来</span><span class="en">Can't model a "weird" scenario</span></td><td><span class="zh">先试打验证条件写法；还不行找维护者（顶栏 ✉）</span><span class="en">Try a shot first to verify the condition syntax; if still stuck, contact the maintainer (top-bar ✉)</span></td></tr>
       </table>
-      <p>更多部署与运维细节（systemd / Docker / 导入导出 / 管理接口），见项目根目录 <code>README.md</code> 与 <code>docs/操作手册.md</code>。</p>
+      <p><span class="zh">更多部署与运维细节（systemd / Docker / 导入导出 / 管理接口），见项目根目录 <code>README.md</code> 与 <code>docs/操作手册.md</code>。</span><span class="en">For more deploy &amp; ops details (systemd / Docker / import-export / admin API), see <code>README.md</code> and <code>docs/操作手册.en.md</code> at the repo root.</span></p>
     </section>
 
-    <footer>Mock Server · 零依赖动态挡板 · 本页由顶栏 ❓ 图标随时打开</footer>
+    <footer><span class="zh">Mock Server · 零依赖动态挡板 · 本页由顶栏 ❓ 图标随时打开</span><span class="en">Mock Server · zero-dependency dynamic mock · open this page anytime from the top-bar ❓ icon</span></footer>
   </main>
 </div>
+<script>
+  (function () {
+    /* 语言取值优先级（逐级回退）：
+     *   1. URL 的 ?lang=zh|en  —— 控制台打开本页时会带上当前界面语言；
+     *   2. 控制台自己的语言键 mockServer.lang —— 同一 origin 共用一份 localStorage；
+     *   3. 本页历史键 mock-help-lang（早期版本写过，保留兼容）；
+     *   4. 浏览器语言。
+     * 这样「控制台切到英文后点顶栏 ❓」进来就是英文，不用在本页再切一次。 */
+    var CONSOLE_KEY = 'mockServer.lang';
+    var LEGACY_KEY = 'mock-help-lang';
+
+    function norm(v) {
+      v = String(v || '').toLowerCase();
+      if (v.indexOf('en') === 0) return 'en';
+      if (v.indexOf('zh') === 0) return 'zh';
+      return '';
+    }
+    function readKey(key) {
+      try { return localStorage.getItem(key); } catch (e) { return null; }
+    }
+    function fromQuery() {
+      var hit = /[?&]lang=([^&]*)/.exec(location.search);
+      return hit ? norm(decodeURIComponent(hit[1])) : '';
+    }
+    function detect() {
+      return fromQuery()
+        || norm(readKey(CONSOLE_KEY))
+        || norm(readKey(LEGACY_KEY))
+        || ((navigator.language || '').toLowerCase().indexOf('en') === 0 ? 'en' : 'zh');
+    }
+
+    function setLang(l, persist) {
+      var current = (l === 'en') ? 'en' : 'zh';
+      document.documentElement.lang = (current === 'en') ? 'en' : 'zh-CN';
+      /* 只有「用户主动在本页切换」才写回存储，且写的是控制台那把键：
+       * 两边不再各记一套语言，下次打开控制台/本页都是一致的。
+       * 加载时写入会把「只是看了一眼帮助页」变成一次显式选择，所以加载不写。 */
+      if (persist) {
+        try { localStorage.setItem(CONSOLE_KEY, current === 'en' ? 'en' : 'zh-CN'); } catch (e) {}
+        try { localStorage.setItem(LEGACY_KEY, current); } catch (e) {}
+      }
+      var btns = document.querySelectorAll('.lang-switch button');
+      for (var i = 0; i < btns.length; i++) {
+        btns[i].classList.toggle('active', btns[i].getAttribute('data-lang') === current);
+      }
+    }
+
+    var btns = document.querySelectorAll('.lang-switch button');
+    for (var i = 0; i < btns.length; i++) {
+      btns[i].addEventListener('click', function () { setLang(this.getAttribute('data-lang'), true); });
+    }
+    setLang(detect(), false);
+  })();
+</script>
 </body>
 </html>

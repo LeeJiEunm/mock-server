@@ -392,7 +392,22 @@
     </form>
   </div>
 
+  <!-- 控制台脚本。**加载顺序 = 执行顺序，不能随意调整**：
+       这些文件共享同一个全局作用域（无模块化、无构建），跨文件调用靠"全部加载完再运行"，
+       但有两处是真的有先后依赖：
+         1. state（state.js）在初始化时就会调用 readLocal，所以两者必须在同一个文件里；
+         2. boot() 写在 app.js 末尾，必须最后一个加载。
+       加新文件时：放在 app.js 之前，并确认它不依赖后面文件里的顶层 const（会踩 TDZ）。 -->
   <script src="scripts/i18n.js"></script>
-  <script src="scripts/main.js"></script>
+  <script src="scripts/state.js"></script>
+  <script src="scripts/core.js"></script>
+  <script src="scripts/theme.js"></script>
+  <script src="scripts/auth.js"></script>
+  <script src="scripts/api-list.js"></script>
+  <script src="scripts/groups.js"></script>
+  <script src="scripts/workspace.js"></script>
+  <script src="scripts/try-logs.js"></script>
+  <script src="scripts/drawer.js"></script>
+  <script src="scripts/app.js"></script>
 </body>
 </html>

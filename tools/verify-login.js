@@ -24,80 +24,22 @@
  * 退出码：0 = 全部通过；1 = 有断言失败。
  */
 
-const { spawn } = require('child_process');
-const fs = require('fs');
-const os = require('os');
-const path = require('path');
-const net = require('net');
-
-const CHROME_CANDIDATES = [
-  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-  '/Applications/Google Chrome Canary.app/Contents/MacOS/Google Chrome Canary',
-  '/usr/bin/google-chrome',
-  '/usr/bin/chromium',
-  '/usr/bin/chromium-browser',
-];
+const cdp = require('./lib/cdp');
 
 const BASE = (process.argv[2] || 'http://127.0.0.1:18080/').replace(/\/+$/, '') + '/';
 const USER = process.argv[3] || 'admin';
 const PASS = process.argv[4] || 'admin123';
 let PORT = 0; // 运行时动态选空闲端口，避免连到上一轮残留的 Chrome
 
-function getFreePort() {
-  return new Promise((resolve, reject) => {
-    const srv = net.createServer();
-    srv.unref();
-    srv.on('error', reject);
-    srv.listen(0, '127.0.0.1', () => {
-      const port = srv.address().port;
-      srv.close(() => resolve(port));
-    });
-  });
-}
+const sleep = cdp.sleep;
 
-const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
-
-function findChrome() {
-  const hit = CHROME_CANDIDATES.find((file) => fs.existsSync(file));
-  if (!hit) {
-    console.error('找不到 Chrome，跳过浏览器自检。');
-    process.exit(2);
-  }
-  return hit;
-}
-
-/* ------------------------------ CDP 小客户端 ------------------------------ */
-
+/* ------------------------------ CDP 客户端 ------------------------------ */
+/* 起 Chrome / 连接 / 命令超时 / 页面报错采集统一在 tools/lib/cdp.js；
+ * 下面保留 send / chrome / PORT 这些旧名字（转发给 page），免得动所有调用点。 */
 let chrome = null;
-let ws = null;
-let msgId = 0;
+let page = null;
 
-function send(method, params) {
-  const id = ++msgId;
-  return new Promise((resolve, reject) => {
-    const onMessage = (event) => {
-      const data = JSON.parse(event.data);
-      if (data.id !== id) return;
-      ws.removeEventListener('message', onMessage);
-      if (data.error) reject(new Error(method + ': ' + JSON.stringify(data.error)));
-      else resolve(data.result);
-    };
-    ws.addEventListener('message', onMessage);
-    ws.send(JSON.stringify({ id: id, method: method, params: params || {} }));
-  });
-}
-
-async function attach() {
-  for (let i = 0; i < 60; i++) {
-    try {
-      const res = await fetch('http://127.0.0.1:' + PORT + '/json/list');
-      const page = (await res.json()).find((target) => target.type === 'page');
-      if (page && page.webSocketDebuggerUrl) return page.webSocketDebuggerUrl;
-    } catch (e) { /* Chrome 还没起来 */ }
-    await sleep(250);
-  }
-  throw new Error('Chrome 调试端口没起来');
-}
+function send(method, params) { return page.send(method, params); }
 
 /** 在页面里跑一段脚本并取回值（返回 { value, thrown }） */
 async function ev(source) {
@@ -221,23 +163,9 @@ function checkLoginText(prefix, r, expect) {
 /* ------------------------------ 主流程 ------------------------------ */
 
 async function main() {
-  const profile = fs.mkdtempSync(path.join(os.tmpdir(), 'mock-login-verify-'));
-  PORT = await getFreePort();
-  chrome = spawn(findChrome(), [
-    '--headless=new',
-    '--remote-debugging-port=' + PORT,
-    '--user-data-dir=' + profile,
-    '--no-first-run',
-    '--no-default-browser-check',
-    '--disable-gpu',
-    'about:blank',
-  ], { stdio: 'ignore' });
-
-  const wsUrl = await attach();
-  ws = new WebSocket(wsUrl);
-  await new Promise((resolve) => ws.addEventListener('open', resolve));
-  await send('Runtime.enable');
-  await send('Page.enable');
+  chrome = await cdp.launchChrome({ profilePrefix: 'mock-login-verify-' });
+  PORT = chrome.port;
+  page = await cdp.connect(PORT);
 
   console.log('目标：' + BASE + '   账号：' + USER + ' / ' + (PASS ? '***' : '(空)'));
 
@@ -298,12 +226,14 @@ async function main() {
   const failed = results.filter((item) => !item.ok).length;
   console.log('-------------------------------------------------');
   console.log('共 ' + results.length + ' 项，失败 ' + failed + ' 项');
+  if (page) await page.close();
+  if (chrome) await chrome.close();
   process.exit(failed === 0 ? 0 : 1);
 }
 
-main().catch((err) => {
+main().catch(async (err) => {
   console.error(err);
+  if (page) await page.close();
+  if (chrome) await chrome.close();
   process.exit(2);
-}).finally(() => {
-  try { if (chrome) chrome.kill(); } catch (e) { /* 忽略 */ }
 });

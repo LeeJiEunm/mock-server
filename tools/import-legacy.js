@@ -28,9 +28,8 @@
 
 const fs = require('fs');
 const path = require('path');
+const { ROOT, CONFIG_FILE, readConfig, writeConfig } = require('./lib/config');
 
-const ROOT = path.resolve(__dirname, '..');
-const CONFIG_FILE = path.join(ROOT, 'config.json');
 const SAMPLE_FILE = path.join(ROOT, 'public', 'sample-config.json');
 const DEFAULT_SOURCE = 'http://<LEGACY_MOCK_HOST>:8084/mock/admin/list';
 
@@ -140,8 +139,9 @@ function convert(row) {
 /* ------------------------------ 合并写入 ------------------------------ */
 
 function loadConfig() {
-  if (!fs.existsSync(CONFIG_FILE)) return { server: { host: '0.0.0.0', port: 18080 }, logSize: 200, groups: [], apis: [] };
-  const config = JSON.parse(fs.readFileSync(CONFIG_FILE, 'utf8'));
+  // readConfig 在缺 config.json 时会先从 config.example.json 生成一份，
+  // 这样导入是在「示例配置」的基础上追加，不会把内置示例接口冲掉。
+  const config = readConfig();
   config.groups = config.groups || [];
   config.apis = config.apis || [];
   return config;
@@ -222,7 +222,7 @@ async function main() {
     return;
   }
 
-  fs.writeFileSync(CONFIG_FILE, JSON.stringify(config, null, 2), 'utf8');
+  writeConfig(config);
   fs.writeFileSync(SAMPLE_FILE, JSON.stringify(config, null, 2), 'utf8');
   console.log('');
   console.log('已写入 ' + path.relative(ROOT, CONFIG_FILE) + ' 与 ' + path.relative(ROOT, SAMPLE_FILE) + '。');

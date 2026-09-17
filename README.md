@@ -83,6 +83,7 @@ cd mock-server && node server.js     # 管理界面 http://127.0.0.1:18080/
 6. **静态资源只走「根路径 / `styles/` / `scripts/` / 带 `.css .js .json .ico .png .svg` 等后缀」这几类**，其余路径一律当挡板接口处理。所以挡板接口路径**不要带静态后缀**（`/demo/query.json` 会被当成静态文件）。
 7. 日志在内存里，重启即清空，默认保留 200 条（`config.json` 的 `logSize` 可调）。
 8. 浏览器自动请求的 `favicon.ico`、`/.well-known/*` **不会进请求日志**，日志里只剩真实业务调用。
+9. **同一路径可以按 HTTP 方法分开配接口**。接口的 `method` 填 `ALL` 或留空 = 匹配所有方法；填 `GET` / `POST` 等只匹配对应请求。同路径同方法仍旧是先定义优先。
 
 ---
 
@@ -105,6 +106,10 @@ node server.js
 
 - 管理界面：http://127.0.0.1:18080/
 - 挡板入口：http://127.0.0.1:18080/{模块}/{接口路径}
+
+> 目录里没有 `config.json` 时，服务会自动从 `config.example.json` 复制一份示例配置——
+> 所以 clone 下来直接 `node server.js` 就能跑，不需要手动准备配置文件。
+> `config.json` 是**运行数据**（界面改的规则都在里面），已加入 `.gitignore`，不会被提交。
 
 > macOS 上常把上游地址配成 `http://127.0.0.1:18080/demo`；注意地址结尾不要带 `/`。
 
@@ -164,7 +169,7 @@ MOCK_ADMIN_USER=zhangsan MOCK_ADMIN_PASS=secret node server.js
 
 **方式二：多个账号写进 `config.json`（团队各自一个）**
 
-密码只存 SHA-256 哈希，不落明文，用自带脚本增删改：
+密码以 scrypt + 随机 salt 哈希存储，不落明文，用自带脚本增删改：
 
 ```bash
 node tools/add-user.js zhangsan secret     # 新增用户 / 改密码
@@ -172,14 +177,16 @@ node tools/add-user.js --list              # 查看现有账号
 node tools/add-user.js --remove zhangsan   # 删除用户
 ```
 
-等价于手改配置（哈希用 `node tools/gen-pass.js 你的密码` 生成）：
+等价于手改配置（哈希用 `node tools/gen-pass.js 你的密码` 生成，格式为 `scrypt:<salt>:<derived>`，每用户随机 salt）：
 
 ```json
 { "users": [
-  { "username": "zhangsan", "passwordHash": "sha256:xxxx" },
-  { "username": "lisi",     "passwordHash": "sha256:yyyy" }
+  { "username": "zhangsan", "passwordHash": "scrypt:<saltB64>:<derivedB64>" },
+  { "username": "lisi",     "passwordHash": "scrypt:<saltB64>:<derivedB64>" }
 ] }
 ```
+
+> 老配置里的 `sha256:<hex>` 仍兼容（迁移期），但新密码一律走 scrypt + 随机 salt，避免离线撞库。
 
 改完自动重载，不用重启服务。
 
@@ -285,7 +292,7 @@ cd mock-server
 
 - 不给 `MOCK_ADMIN_PASS` = 免密：主端口面板谁都能打开、谁都能改规则 —— 适合内网联调，**别放到公网**。
 - `-r 18081` 时脚本会自动：写 `Environment=READONLY_PORT=18081` 进 systemd 单元（plain 模式写进启动命令、docker 模式生成 compose 叠加文件）、占用检查覆盖两个端口、防火墙同时放行 `18080` 与 `18081`。
-- 只读端口 `18081` 上：`/login` 被禁、任何非 GET 写操作一律 403、没带有效 `?share=` 时页面显示「需要有效的分享链接」。
+- 只读端口 `18081` 上：`/login` 被禁、任何非 GET 写操作一律 403；**除 `/_admin/auth` 外的管理接口都要求带有效分享链接**——不带令牌直接访问 `/_admin/config`、`/_admin/share`、`/_admin/logs` 等一律 403（服务端拦截，不是只在前端画个提示页），页面上才会显示「需要有效的分享链接」。
 - 生成分享链接后，URL 形如 `http://<HOST_IP>:18081/?share=shr-xxxx` —— 对方把 `?share=...` 删掉也只是这个只读页面，改不动任何东西。
 - 安全边界：这个隔离**只保护分享链接**。`18080` 主端口无保护，建议用防火墙把主端口收紧到自己/内网网段，只对测试同学放行 `18081`。
 
@@ -319,7 +326,7 @@ MOCK_DEFAULT_LANG=en MOCK_ADMIN_PASS=secret ./deploy.sh root@<HOST_IP>
 | 1 | 探测环境 | 找出远端 node 绝对路径与版本，以及有没有 systemd / docker |
 | 2 | 停旧实例 | 升级重部署时先停掉在跑的旧版，避免端口被自己占用 |
 | 3 | 查端口 | 端口被别的进程占了直接报错退出，不会静默顶掉别人 |
-| 4 | 上传文件 | `server.js` + `public/` + `tools/`（用户管理脚本）；`config.json` 默认保留远端那份（那是你配好的规则） |
+| 4 | 上传文件 | `server.js` + `public/` + `tools/`（用户管理脚本）+ `config.example.json`；`config.json` 默认保留远端那份（那是你配好的规则）；本地若还没有 `config.json`，脚本会改传 `config.example.json` |
 | 5 | 安装启动 | 按真实路径生成 systemd 单元并 `enable --now` |
 | 6 | 健康检查 | 打 `/_admin/health`；**200 或 401 都算就绪**（401 说明开了登录保护），不通过打印排查命令 |
 | 7 | 放行端口 | 有 firewalld 则放行；给了 `-r` 会连只读端口一起放行，没有 firewalld 就跳过 |
@@ -360,9 +367,9 @@ REMOTE
 不用脚本时，照 `mock-server.service` 模板填 4 个占位符后传到目标机：
 
 ```bash
-# 1) 上传文件
+# 1) 上传文件（本地没有 config.json 时传 config.example.json，服务首次启动会自动复制它）
 ssh <user>@<HOST_IP> 'mkdir -p /opt/mock-server'
-scp -r server.js config.json public <user>@<HOST_IP>:/opt/mock-server/
+scp -r server.js config.example.json public <user>@<HOST_IP>:/opt/mock-server/
 
 # 2) 查 node 绝对路径（要写进 service 文件，不能照抄 /usr/bin/node）
 ssh <user>@<HOST_IP> 'command -v node'
@@ -380,7 +387,8 @@ ssh <user>@<HOST_IP> 'sudo systemctl daemon-reload && sudo systemctl enable --no
 宿主机只需装好 docker + compose，不需要 node：
 
 ```bash
-# 宿主机上执行（先保证宿主机已有 config.json，否则 docker 会把目录挂到配置文件位置）
+# 宿主机上执行。config.json 是卷挂载目标，必须先存在，否则 docker 会把目录挂到该位置：
+#   cp config.example.json config.json
 MOCK_PORT=18080 docker compose up -d --build
 ```
 
@@ -519,9 +527,18 @@ upstream.service.demo.token=mock                    # 挡板不校验，随便�
 | 项 | 说明 |
 | --- | --- |
 | HTTP 状态 | 任意状态码，测试异常分支时用（500 / 502 / 404…） |
-| 延迟 | 毫秒，测超时、加载中、重试用 |
+| 延迟 | 毫秒，测超时、加载中、重试用。**单个请求最多挂起 30 秒**，填更大按 30 秒算（`MOCK_MAX_DELAY_MS` 可调） |
 | Content-Type | 默认 `application/json;charset=UTF-8` |
 | 返回方式 | **静态文本** 或 **脚本生成** |
+
+> 延迟与故障注入的 `timeout` 都要占住连接。同时挂住的请求超过 50 个时，多出来的直接返回
+> **503**（不排队，消息里写明原因），免得挂满文件描述符把管理界面一起拖死；上限可用
+> `MOCK_MAX_HELD_REQUESTS` 调整。
+
+> 请求日志里存的是 body 的**副本**，单条最多留 **100KB**：超出后正文只保留前 100KB 并在末尾
+> 标注原文大小，日志条目上也会带 `reqBodyTruncated` / `respBodyTruncated`（`{kept, total}`），
+> 抽屉里会显式提示「你看到的是半份」。**回给调用方的响应体始终是完整的** —— 截断只作用于日志，
+> 代理透传不受影响。上限用 `MOCK_LOG_BODY_LIMIT` 调（单位字节，填 0 关闭截断）。
 
 **静态文本**支持变量替换：
 
@@ -550,6 +567,8 @@ return {
 ```
 
 脚本抛错时返回 500，错误信息直接写在响应里，方便定位。
+
+脚本在 vm 沙箱里同步执行：默认 1 秒超时、64KB 长度上限（`MOCK_SCRIPT_TIMEOUT_MS` / `MOCK_SCRIPT_MAX_LEN` 可调），死循环或超大脚本会直接返回 500，不再卡住整个服务。
 
 ### 接口级变量
 
@@ -613,8 +632,9 @@ return {
 
 - 对方打开链接只能查看规则，**改不了配置**（服务端同步兜底拦截写请求）；
 - 链接被撤销后，对方打开会看到「分享链接已失效」提示页，不会降级为可编辑视图；
-- 部署时配置 `READONLY_PORT`（只读隔离端口）后，分享链接走独立端口——**对方把 URL 上的 `?share=` 去掉也依然只读**。免密部署必须配置它才允许生成分享链接（否则界面上点「生成」返回 403）。
+- 部署时配置 `READONLY_PORT`（只读隔离端口）后，分享链接走独立端口——**对方把 URL 上的 `?share=` 去掉，不只是只读，连配置都拿不到**（该端口除 `/_admin/auth` 外都要求带令牌，由服务端拦截）。免密部署必须配置它才允许生成分享链接（否则界面上点「生成」返回 403）。
 - 一键部署直接带上它即可：`./deploy.sh <user>@<HOST_IP> -r 18081`（详见 5.2）。链接形如 `http://<HOST_IP>:18081/?share=shr-xxxx`；只读端口上 `/login` 被禁、写操作一律 403。
+- 只读身份（分享链接或只读端口）能看的只有规则本身：`/_admin/config` 会剥掉 `users`、`shareTokens`，令牌清单 `/_admin/share` 只对可编辑身份开放——拿到一条分享链接不等于拿到全部链接和别人账号的哈希。
 
 ![分享链接弹窗](docs/shot-share.png)
 
@@ -641,10 +661,10 @@ return {
 | GET | `/_admin/health` | 健康检查（接口数、分组数、规则数、运行时长） |
 | GET | `/_admin/auth` | 认证状态（是否需要登录、是否只读分享、分享令牌是否失效） |
 | POST | `/_admin/login` | 登录（body：`{username, password}`，返回会话 token） |
-| GET | `/_admin/config` | 读全量配置（含 `groups`） |
-| POST | `/_admin/config` | 保存全量配置（body 就是配置 JSON） |
+| GET | `/_admin/config` | 读全量配置（含 `groups`；**不下发 `users` / `shareTokens`**，只读身份也拿不到） |
+| POST | `/_admin/config` | 保存全量配置（body 就是配置 JSON；`users` / `shareTokens` 由服务端保留，body 里没有也不会丢） |
 | POST | `/_admin/reload` | 从磁盘重新读取 `config.json` |
-| GET / POST / DELETE | `/_admin/share` | 只读分享链接：列出 / 生成 / 撤销（`?token=`） |
+| GET / POST / DELETE | `/_admin/share` | 只读分享链接：列出 / 生成 / 撤销（`?token=`；**列出仅限可编辑身份**，只读分享令牌与只读端口调它返回 403） |
 | GET / POST / DELETE | `/_admin/users` | 登录用户管理（仅部署管理员） |
 | GET | `/_admin/logs?limit=50` | 最近请求日志 |
 | POST | `/_admin/logs/clear` | 清空日志 |
@@ -725,30 +745,50 @@ node tools/import-legacy.js --prune                                # 顺带清�
 ```
 mock-server/
 ├── server.js              # 服务本体（零依赖）
-├── config.json            # 接口与规则配置（唯一数据源，已脱敏为示例）
+├── config.example.json    # 示例配置（**入库**）：首次启动没有 config.json 时自动复制它
+├── config.json            # 接口与规则配置（唯一数据源；运行数据，**不入库**）
 ├── public/
 │   ├── index.html         # 控制台页面（CSS/JS 全用相对路径）
 │   ├── help.html          # 网页版操作手册（顶栏 ❓ 打开；单文件自带样式，无依赖）
-│   ├── help/              # 手册内嵌截图（shot-console / shot-share）
+│   ├── help/              # 手册内嵌截图（shot-console / shot-share；.en.png 为英文版）
 │   ├── styles/
 │   │   ├── tokens.css     # 设计令牌：颜色、字阶、间距、主题（暗/浅）
 │   │   ├── base.css       # 重置、排版、焦点、氛围层、动效降级
 │   │   └── components.css # 组件与布局
-│   ├── scripts/main.js    # 控制台逻辑（原生 JS，无框架）
+│   ├── scripts/           # 控制台逻辑（原生 JS，无框架、无构建；按功能拆成多个文件，
+│   │   │                  # 由 index.html 按序加载、共享同一全局作用域，顺序不可随意调整）
+│   │   ├── i18n.js        # 中英文案与多语言渲染
+│   │   ├── state.js       # 全局状态、常量、本地偏好读写
+│   │   ├── core.js        # 小工具、示例配置与接口模板、配置读写
+│   │   ├── theme.js       # 主题与侧栏折叠
+│   │   ├── auth.js        # 登录态、只读分享、分享链接、用户菜单
+│   │   ├── api-list.js    # 顶栏统计、左侧接口列表与定位
+│   │   ├── groups.js      # 通用弹窗与分组维护
+│   │   ├── workspace.js   # 工作区与只读详情
+│   │   ├── try-logs.js    # 试打一枪、变更记录、请求日志
+│   │   ├── drawer.js      # 接口 / 规则抽屉
+│   │   └── app.js         # 渲染总入口、事件绑定、批量选择、启动
 │   └── sample-config.json # 仅供"离线预览"用的示例配置，服务端运行时不读它
 ├── docs/
 │   ├── 操作手册.md         # 任务导向速查手册（面向测试 / 联调同事）
-│   └── shot-*.png         # README 与手册用的界面截图
-├── tools/                 # 辅助脚本，不参与部署
+│   └── shot-*.png         # README 与手册用的界面截图（shot-*.en.png 为英文版）
+├── tools/                 # 辅助脚本，不参与部署（server.js 在远端独立运行，不 require 它们）
+│   ├── lib/config.js      # 工具共用：定位配置文件 + 缺 config.json 时从示例生成
+│   ├── lib/cdp.js         # 工具共用：起无头 Chrome / 连调试端口 / 截图 / 采集页面 JS 报错
+│   ├── lib/sandbox.js     # 工具共用：在临时目录搭一份隔离副本跑自检（不碰仓库里的 config.json）
 │   ├── import-legacy.js   # 从老 mock 平台导入接口（幂等，可重复跑）
 │   ├── add-user.js        # 增删改控制台登录用户（写 config.json 的 users）
-│   ├── gen-pass.js        # 生成密码的 SHA-256 哈希
+│   ├── gen-pass.js        # 生成密码的 scrypt 哈希（每用户随机 salt，格式 scrypt:<salt>:<derived>）
 │   ├── verify-ui.js       # 真浏览器自检：试打反馈 / 主题 / 字阶 / 对比度 / 窄屏输入框
 │   ├── verify-login.js    # 真浏览器自检：登录文案 / 输入不被清空 / 登录边界（mock 免登录）
 │   ├── verify-docs.js     # 中英文档对齐自检：两份 README 的章节标记必须一致
+│   ├── verify-server-basics.js # 服务端基础自检：缺/坏 config.json 的启动行为、静态目录穿越守卫
+│   ├── verify-auth-security.js # 鉴权自检：登录边界 / 只读分享令牌 / 会话
+│   ├── verify-mock-limits.js   # 限额自检：请求体大小、规则条数等上限真的生效
+│   ├── verify-console-boot.js  # 真浏览器自检：脚本装配 + 启动零报错 + 跨文件调用 + 交互与切语言
 │   └── verify-deploy.sh  # 部署脚本本地沙盘自检：假 ssh，断言只读端口等参数真的落到远端配置
 ├── package.json           # 工程元数据（name=mock-server / 仓库地址 / 作者 / npm start）
-├── .gitignore             # 忽略日志、备份、临时文件（config.json 故意入库，见文件头说明）
+├── .gitignore             # 忽略日志、备份、临时文件、config.json（运行数据不入库，见文件头说明）
 ├── Dockerfile
 ├── docker-compose.yml
 ├── mock-server.service    # systemd 单元模板（deploy.sh 会按实际路径生成正式那份）
@@ -781,6 +821,14 @@ node tools/verify-login.js http://127.0.0.1:18080/ admin admin123
 ```
 
 它断言 30 项：中英文登录文案（防止界面直接显示 `login.username` 这种原始 key）、输入过程中不被清空 / 焦点不被抢走、密码错的中文提示与「只清密码保留用户名」、登录后能进控制台、以及 mock 接口免登录照样 200。
+
+这些自检可以一次跑完（各自搭沙盘、不碰仓库里的 `config.json`，也不用事先起服务）：
+
+```bash
+npm run verify:all      # docs → auth → limits → basics → console
+```
+
+其中 `verify:console` 是**拆前端脚本后新增**的：它断言 `index.html` 的脚本清单与磁盘文件完全一致（拆完最容易漏加/多加一个文件）、启动过程零 JS 错误、分布在各个拆出文件里的渲染函数跨文件都调得到、以及点接口 / 开抽屉 / 切语言的行为没变。这几处服务端自检完全看不见，只有真浏览器能守住。
 
 ---
 

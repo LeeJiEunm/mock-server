@@ -269,17 +269,28 @@ echo "==> 3/7 上传文件 -> $TARGET:$REMOTE_DIR"
 ssh $SSH_OPTS "$TARGET" "mkdir -p '$REMOTE_DIR'"
 scp $SSH_OPTS -q "$LOCAL_DIR/server.js" "$TARGET:$REMOTE_DIR/server.js"
 scp $SSH_OPTS -qr "$LOCAL_DIR/public" "$TARGET:$REMOTE_DIR/"
+scp $SSH_OPTS -qr "$LOCAL_DIR/lib" "$TARGET:$REMOTE_DIR/"
+# config.example.json 必须一起传：远端缺 config.json 时由 server.js 复制它来生成，
+# docker 模式的 Dockerfile 也要 COPY 它（不传的话 docker 构建会直接失败）。
+[ -f "$LOCAL_DIR/config.example.json" ] && scp $SSH_OPTS -q "$LOCAL_DIR/config.example.json" "$TARGET:$REMOTE_DIR/config.example.json"
 [ -f "$LOCAL_DIR/README.md" ] && scp $SSH_OPTS -q "$LOCAL_DIR/README.md" "$TARGET:$REMOTE_DIR/README.md"
 # 带上用户管理脚本：远端可直接 `cd $REMOTE_DIR && node tools/add-user.js 用户名 密码`
 ssh $SSH_OPTS "$TARGET" "mkdir -p '$REMOTE_DIR/tools'"
+scp $SSH_OPTS -qr "$LOCAL_DIR/tools/lib" "$TARGET:$REMOTE_DIR/tools/"
 for f in add-user.js gen-pass.js; do
   [ -f "$LOCAL_DIR/tools/$f" ] && scp $SSH_OPTS -q "$LOCAL_DIR/tools/$f" "$TARGET:$REMOTE_DIR/tools/$f"
 done
-echo "    server.js / public/ / tools 已同步"
+echo "    server.js / lib / public / tools 已同步"
 
 # config.json 默认不覆盖：远端那份是你在界面上配好的规则
+# 本地可能压根没有 config.json（它是运行数据、不入库），那就先拿示例顶上。
+LOCAL_CONFIG="$LOCAL_DIR/config.json"
+if [ ! -f "$LOCAL_CONFIG" ]; then
+  LOCAL_CONFIG="$LOCAL_DIR/config.example.json"
+  echo "    本地没有 config.json，改用 config.example.json（示例数据）"
+fi
 if [ "$FORCE_CONFIG" = "yes" ] || ! ssh $SSH_OPTS "$TARGET" "test -f '$REMOTE_DIR/config.json'"; then
-  scp $SSH_OPTS -q "$LOCAL_DIR/config.json" "$TARGET:$REMOTE_DIR/config.json"
+  scp $SSH_OPTS -q "$LOCAL_CONFIG" "$TARGET:$REMOTE_DIR/config.json"
   echo "    config.json 已写入"
 else
   echo "    config.json 远端已存在 -> 保留不动（要强制覆盖加 -f）"
@@ -334,7 +345,7 @@ elif [ "$MODE" = "plain" ]; then
 elif [ "$MODE" = "docker" ]; then
   # 这里不要再传 config.json：第 4 步已按「远端存在则保留」处理过，
   # 在这里无条件覆盖会把用户在界面上配好的规则冲掉。
-  # build 上下文就是 $REMOTE_DIR，Dockerfile 里 COPY 的 server.js / config.json / public 都在。
+  # build 上下文就是 $REMOTE_DIR，Dockerfile 里 COPY 的 server.js / config.example.json / public 都在。
   for f in Dockerfile docker-compose.yml; do
     [ -f "$LOCAL_DIR/$f" ] && scp $SSH_OPTS -q "$LOCAL_DIR/$f" "$TARGET:$REMOTE_DIR/$f"
   done
@@ -385,15 +396,26 @@ if [ "$HEALTH_OK" = "yes" ]; then
   fi
   echo
 else
-  echo "    !! 健康检查没通过。排查："
+  echo "    !! 健康检查没通过。已尝试抓取最近日志："
   if [ "$MODE" = "systemd" ]; then
+    echo "    --- systemctl status ---"
+    ssh $SSH_OPTS "$TARGET" "${SUDO}systemctl status $SERVICE_NAME -l --no-pager | head -60 || true"
+    echo "    --- journalctl 最近 50 行 ---"
+    ssh $SSH_OPTS "$TARGET" "${SUDO}journalctl -u $SERVICE_NAME -n 50 --no-pager || true"
+    echo "    --- 排查命令 ---"
     echo "       ssh $TARGET '${SUDO}systemctl status $SERVICE_NAME -l --no-pager'"
     echo "       ssh $TARGET '${SUDO}journalctl -u $SERVICE_NAME -n 50 --no-pager'"
   elif [ "$MODE" = "docker" ]; then
+    echo "    --- compose ps ---"
+    ssh $SSH_OPTS "$TARGET" "cd '$REMOTE_DIR' && ${SUDO}${COMPOSE_CMD} ps || true"
+    echo "    --- compose logs 最近 50 行 ---"
+    ssh $SSH_OPTS "$TARGET" "cd '$REMOTE_DIR' && ${SUDO}${COMPOSE_CMD} logs --tail=50 || true"
     echo "       ssh $TARGET 'cd $REMOTE_DIR && ${SUDO}${COMPOSE_CMD} ps'"
     echo "       ssh $TARGET 'cd $REMOTE_DIR && ${SUDO}${COMPOSE_CMD} logs --tail=50'"
     echo "     常见原因：宿主机拉不到 node:20-alpine 镜像（内网需先 docker load 离线包）"
   else
+    echo "    --- mock-server.log 最近 50 行 ---"
+    ssh $SSH_OPTS "$TARGET" "tail -50 '$REMOTE_DIR/mock-server.log' || true"
     echo "       ssh $TARGET 'tail -50 $REMOTE_DIR/mock-server.log'"
   fi
 fi

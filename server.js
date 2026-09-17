@@ -11,9 +11,10 @@
  * 配置外置：config.json，界面改完点保存即写回该文件（不重启生效）。
  *
  * 目录约定：
- *   server.js        服务本体
- *   config.json      接口与规则配置（唯一数据源）
- *   public/          管理界面静态资源
+ *   server.js           服务本体
+ *   config.json         接口与规则配置（唯一数据源；**运行数据，不入库**）
+ *   config.example.json 示例配置（入库）；首次启动若没有 config.json，自动复制一份
+ *   public/             管理界面静态资源
  */
 
 const http = require('http');
@@ -23,8 +24,16 @@ const path = require('path');
 const crypto = require('crypto');
 const { URL } = require('url');
 
+/* 逻辑分层（lib/）：server.js 只负责「持有状态 + HTTP 路由」，纯逻辑一律放 lib/。
+ * 拆分的判据是「有没有读全局状态」——读 config / logs / sessions 的留下，只吃参数的搬走。
+ * 这样一来每个 lib 模块都能被单独 require 做单测（见 tools/verify-core-logic.js）。 */
+const { tokenizePath, collectValues, pick, compareOne, evalCondition, describeMatch, matchRules } = require('./lib/matching');
+const { FAULT_TYPES, renderTemplate, renderResponse, malformedBody, setAllowScriptMode } = require('./lib/render');
+const { normalizeMeta, configRevOf, normalizeMethod, apiMethodMatches, apiFingerprint, diffConfig, stampAuthors } = require('./lib/config-logic');
+
 const ROOT = __dirname;
 const CONFIG_FILE = path.join(ROOT, 'config.json');
+const CONFIG_EXAMPLE_FILE = path.join(ROOT, 'config.example.json');
 const PUBLIC_DIR = path.join(ROOT, 'public');
 const ADMIN_PREFIX = '/_admin';
 const MAX_BODY = 8 * 1024 * 1024;
@@ -66,6 +75,7 @@ function resolvedDefaultLang() {
 }
 
 const SESSION_TTL = 24 * 60 * 60 * 1000;
+const MAX_SESSIONS = 2000; // 令牌数量上限：防登录接口被刷导致 sessions 无限增长
 const sessions = new Map();
 
 // 只读隔离端口（免密部署隔离用）：分享链接走独立端口，剥离 ?share= 也只能是只读，
@@ -73,16 +83,71 @@ const sessions = new Map();
 let LISTEN_PORT = 0;
 let RO_PORT = 0;
 
-// 密码以 SHA-256 哈希存储：passwordHash 格式 "sha256:<hex>"
-function sha256Hex(pw) {
-  return 'sha256:' + crypto.createHash('sha256').update(String(pw)).digest('hex');
+// 密码哈希：scrypt + 每用户随机 salt（替代原先无盐的裸 SHA-256，避免离线撞库）。
+// passwordHash 新格式 "scrypt:<saltB64>:<derivedB64>"；为兼容老配置仍接受 "sha256:<hex>"（无盐，仅迁移期）。
+const SCRYPT_KEYLEN = 64;
+const SCRYPT_COST = 16384; // N=2^14，约 16MB/次；CLI 一次性生成与每请求登录校验均可接受
+function hashPassword(pw) {
+  const salt = crypto.randomBytes(16);
+  const derived = crypto.scryptSync(String(pw), salt, SCRYPT_KEYLEN, { cost: SCRYPT_COST, blockSize: 8, parallelization: 1 });
+  return 'scrypt:' + salt.toString('base64') + ':' + derived.toString('base64');
 }
+function verifyPassword(pw, stored) {
+  if (typeof stored !== 'string') return false;
+  if (stored.startsWith('scrypt:')) {
+    const parts = stored.split(':');
+    if (parts.length !== 3) return false;
+    const salt = Buffer.from(parts[1], 'base64');
+    const expected = Buffer.from(parts[2], 'base64');
+    const derived = crypto.scryptSync(String(pw), salt, expected.length, { cost: SCRYPT_COST, blockSize: 8, parallelization: 1 });
+    return safeEqual(derived, expected);
+  }
+  if (stored.startsWith('sha256:')) { // 迁移期兼容：老配置里的无盐哈希，校验通过但建议改密码以转成 scrypt
+    const hex = crypto.createHash('sha256').update(String(pw)).digest('hex');
+    return safeEqual(Buffer.from(stored.slice(7)), Buffer.from(hex));
+  }
+  return false;
+}
+// 常量时间比较，避免口令字节级时序侧信道；长度不同直接判否（长度泄漏可接受）。
+function safeEqual(a, b) {
+  const ba = Buffer.isBuffer(a) ? a : Buffer.from(String(a));
+  const bb = Buffer.isBuffer(b) ? b : Buffer.from(String(b));
+  if (ba.length !== bb.length) return false;
+  return crypto.timingSafeEqual(ba, bb);
+}
+// 登录失败限速：同一客户端 IP 在窗口内连续失败过多则拒绝，缓解撞库。
+const LOGIN_WINDOW_MS = 5 * 60 * 1000;
+const LOGIN_MAX_FAILS = 10;
+const loginFails = new Map(); // ip -> { count, first }
+function checkLoginAllowed(ip) {
+  const rec = loginFails.get(ip);
+  if (!rec) return true;
+  if (Date.now() - rec.first > LOGIN_WINDOW_MS) { loginFails.delete(ip); return true; }
+  return rec.count < LOGIN_MAX_FAILS;
+}
+function registerLoginFail(ip) {
+  const rec = loginFails.get(ip) || { count: 0, first: Date.now() };
+  if (Date.now() - rec.first > LOGIN_WINDOW_MS) { rec.count = 0; rec.first = Date.now(); }
+  rec.count += 1;
+  loginFails.set(ip, rec);
+}
+function resetLoginFails(ip) { loginFails.delete(ip); }
 
 // isDeployAdmin=true 表示这是「部署期环境变量管理员」(MOCK_ADMIN_USER/MOCK_ADMIN_PASS)，
 // 拥有用户管理（增删改 config.json 的 users）权限；config.json 里的普通 users 账号为 false。
 function issueToken(username, isDeployAdmin) {
+  clearExpiredSessions();
   const token = crypto.randomUUID();
   sessions.set(token, { ts: Date.now(), username: username || '', isDeployAdmin: !!isDeployAdmin });
+  // 兜底上限：超出则淘汰最旧的令牌，避免极端情况下 sessions 无限增长
+  if (sessions.size > MAX_SESSIONS) {
+    let overflow = sessions.size - MAX_SESSIONS;
+    for (const [tk] of sessions.entries()) {
+      if (overflow <= 0) break;
+      sessions.delete(tk);
+      overflow -= 1;
+    }
+  }
   return token;
 }
 
@@ -142,6 +207,25 @@ function shareTokenInvalid(req) {
   return !findShareToken(token);
 }
 
+/** 只读隔离端口上从请求里取「有效分享令牌」，无效则返回空串。
+ *  两个来源都要认：初次打开的页面 URL 带 ?share=，而前端之后发的 fetch 是 /_admin/auth、
+ *  /_admin/config 这类相对路径（URL 里没有 ?share=），令牌放在 Authorization: Bearer 头里。 */
+function roShareToken(req) {
+  const hit = /[?&]share=([^&]+)/.exec(req.url || '');
+  const fromUrl = hit ? decodeURIComponent(hit[1]) : '';
+  const fromHeader = extractToken(req);
+  const token = fromUrl || fromHeader;
+  return token && findShareToken(token) ? token : '';
+}
+
+/** 只读隔离端口是否带了有效分享令牌（非只读端口恒为 true）。
+ *  必须在服务端自己判：前端只是拿 /auth 的 shareRequired 渲染「需要有效分享链接」提示页，
+ *  直接 curl 打 /_admin/config 仍能拿到全量配置。 */
+function roShareOk(req) {
+  if (!req.__ro) return true;
+  return !!roShareToken(req);
+}
+
 /** 分享链接地址（沿用访问者当前使用的主机名，内网多网卡时各人拿到的地址互不影响） */
 function shareUrl(req, token) {
   let host = req.headers.host || 'localhost';
@@ -184,17 +268,77 @@ function authJson(res, required) {
  * 一、配置读写
  * ========================================================================== */
 
+/* 注意：这里曾经有个 configMtime 变量（loadConfig / saveConfig 各写一次，全项目零读取）。
+ * 它的原意大概是「自己刚写的那次 fs.watch 事件可以跳过重载」，但那个去重从没实现过，
+ * 于是只是个没人看的赋值。真要跳过自写事件，靠的是 fs.watch 回调 + 内容比较，不是 mtime，
+ * 所以删掉，免得下一个人以为它在起作用。 */
 let config = { server: {}, groups: [], apis: [] };
-let configMtime = 0;
+
+/** 没配置时用的最小骨架：保证任何环境下服务都能起来，而不是一个 ENOENT 栈把启动打断 */
+function builtinConfig() {
+  return {
+    server: { host: '0.0.0.0', port: 18080, readonlyPort: 0 },
+    logSize: 200,
+    groups: [],
+    apis: [],
+    meta: {},
+    users: [],
+    changelog: [],
+    shareTokens: [],
+  };
+}
+
+/**
+ * 启动前的配置兜底（#16：把「示例」和「运行数据」分开之后，靠这里继续保证 clone 即跑）：
+ *   1. config.json 在 → 什么都不做（正常运行路径）
+ *   2. 不在、但 config.example.json 在 → 复制一份，并说明来源
+ *   3. 两个都没有 → 写一份内置最小配置
+ * 另外把两种「文件在但用不了」的情况翻成人话：目录（Docker 单文件绑定的经典坑）
+ * 和 JSON 解析失败。否则用户看到的只是一段 ENOENT / SyntaxError 栈。
+ */
+function ensureConfigFile() {
+  let st = null;
+  try { st = fs.statSync(CONFIG_FILE); } catch (e) { st = null; }
+
+  if (st && st.isDirectory()) {
+    console.error('[config] ' + CONFIG_FILE + ' 是个目录，不是文件。');
+    console.error('[config] 常见原因：docker 把宿主机上不存在的文件按目录挂载了进来。');
+    console.error('[config] 处理：删掉该目录，执行 cp config.example.json config.json 再启动。');
+    throw new Error('config.json 是目录，无法作为配置文件读取');
+  }
+  if (st) return;
+
+  if (fs.existsSync(CONFIG_EXAMPLE_FILE)) {
+    fs.copyFileSync(CONFIG_EXAMPLE_FILE, CONFIG_FILE);
+    console.log('[config] 未找到 config.json，已从 config.example.json 复制一份（示例数据，可直接在界面里改）');
+    return;
+  }
+  fs.writeFileSync(CONFIG_FILE, JSON.stringify(builtinConfig(), null, 2) + '\n', 'utf8');
+  console.log('[config] 未找到 config.json / config.example.json，已生成一份最小配置');
+}
 
 function loadConfig() {
   const raw = fs.readFileSync(CONFIG_FILE, 'utf8');
-  config = JSON.parse(raw);
+  try {
+    config = JSON.parse(raw);
+  } catch (e) {
+    throw new Error('config.json 不是合法 JSON（' + e.message + '）。文件：' + CONFIG_FILE
+      + '；可先把该文件备份，再用 config.example.json 覆盖。');
+  }
+  config.meta = normalizeMeta(config.meta);
   config.groups = normalizeGroups(config.groups);
   config.apis = config.apis || [];
   config.apis.forEach(normalizeApi);
-  configMtime = fs.statSync(CONFIG_FILE).mtimeMs;
+  // 脚本模式开关 + 接口路径索引/命中计数随配置重载同步
+  setAllowScriptMode(config.scriptMode !== false);
+  apiIndexDirty = true;
+  pruneHitStats();
   return config;
+}
+
+/** 当前配置版本：每次 POST /_admin/config 成功 +1，用于多人同时保存的冲突检测 */
+function configRev() {
+  return configRevOf(config);
 }
 
 /** 分组：只用于左侧列表归类；接口通过 groupId 关联，找不到分组就落到「未分组」 */
@@ -215,6 +359,7 @@ function normalizeGroups(groups) {
 function normalizeApi(api) {
   api.id = api.id || 'api-' + crypto.randomUUID().slice(0, 8);
   api.enabled = api.enabled !== false;
+  api.method = normalizeMethod(api.method);
   api.rules = api.rules || [];
   api.rules.forEach((rule, index) => {
     rule.id = rule.id || 'r' + (index + 1);
@@ -231,12 +376,32 @@ function normalizeApi(api) {
   return api;
 }
 
-/* 故障注入类型：none 正常 / timeout 挂起不返回 / malformed 截断响应体 / abort 直接断开连接。
- * 三种故障分别对应客户端三种可观测现象：请求超时、JSON 解析失败、连接被重置。 */
-const FAULT_TYPES = ['none', 'timeout', 'malformed', 'abort'];
+/* FAULT_TYPES（故障注入类型：none / timeout / malformed / abort）已随渲染逻辑搬到
+ * lib/render.js —— 渲染时要按它校验，配置归一化也用同一份，从那里 import 即可，别再复制一份。 */
 
 /** 挂起多久后放弃：故障挂起不能把 socket 永久占死，到点强制断开；可用环境变量缩短（自检用） */
 const FAULT_TIMEOUT_MS = Math.max(1000, Number(process.env.MOCK_FAULT_TIMEOUT_MS) || 30000);
+
+/** 单个请求的延迟上限：延迟配成几小时会一直占着连接不放（叠加 timeout 故障更狠） */
+const MAX_DELAY_MS = Math.max(0, Number(process.env.MOCK_MAX_DELAY_MS) || 30000);
+
+/* 同时挂住的请求数上限：延迟与 timeout 故障都不吃 CPU，但占连接，并发一多就把 fd 打满，
+ * 挡板和管理界面会一起不响应。到顶之后不排队，直接 503 并在消息里写明原因。 */
+const MAX_HELD_REQUESTS = Math.max(1, Number(process.env.MOCK_MAX_HELD_REQUESTS) || 50);
+let heldRequests = 0;
+
+/* 请求日志里「留一份」的 body 上限（字节）。
+ *
+ * 日志是环形缓冲（默认 200 条）：代理一旦指向下载 / 大 JSON 接口，整份 body 抄进来
+ * 会让内存随日志条数线性上涨，前端还要整份 prettyJson 渲染。
+ * 这里截的只是「日志里留存的那一份」——回给调用方的响应体仍然是完整的。
+ *
+ * 请求体与响应体共用一个上限：请求体的 8MB 上限（MAX_BODY）只管「收不收」，
+ * 收下之后同样会进日志，所以两边得一起夹。
+ *
+ * 默认 100KB：联调接口的返回基本都是几 KB 量级，100KB 足够看清结构；
+ * 200 条 × 100KB ≈ 20MB 是日志内存的上界。要临时放宽用 MOCK_LOG_BODY_LIMIT。 */
+const LOG_BODY_LIMIT = Math.max(0, Number(process.env.MOCK_LOG_BODY_LIMIT) || 100 * 1024);
 
 function defaultResponse() {
   return {
@@ -251,13 +416,20 @@ function defaultResponse() {
   };
 }
 
+/** 延迟夹取：负数归零、超过上限截到上限。
+ * 夹在「配置层」（normalizeResponse）而不是每次发请求时，是为了让界面里填的数和实际会等的
+ * 时间是同一个数——否则用户填 1 小时、实际等 30 秒，界面却一直显示 1 小时，排查时像灵异事件。 */
+function clampDelay(ms) {
+  return Math.min(MAX_DELAY_MS, Math.max(0, Number(ms) || 0));
+}
+
 /** 补全响应字段：老配置里没有 delayMaxMs / fault，读进来必须补齐，否则界面上是 undefined */
 function normalizeResponse(response) {
   const out = Object.assign(defaultResponse(), response || {});
   out.mode = out.mode === 'script' ? 'script' : 'static';
   out.status = Number(out.status) || 200;
-  out.delayMs = Math.max(0, Number(out.delayMs) || 0);
-  out.delayMaxMs = Math.max(0, Number(out.delayMaxMs) || 0);
+  out.delayMs = clampDelay(out.delayMs);
+  out.delayMaxMs = clampDelay(out.delayMaxMs);
   if (out.delayMaxMs < out.delayMs) out.delayMaxMs = out.delayMs;   // 区间填反了就当固定值
   if (FAULT_TYPES.indexOf(out.fault) < 0) out.fault = 'none';
   out.contentType = out.contentType || 'application/json;charset=UTF-8';
@@ -272,18 +444,36 @@ function normalizeResponse(response) {
  * 下次启动 JSON.parse 直接失败，配置全丢。rename 在同一文件系统内是原子的，
  * 任何时刻 config.json 要么是完整的旧内容，要么是完整的新内容。
  */
-function saveConfig() {
-  const tmpFile = CONFIG_FILE + '.tmp';
-  const payload = JSON.stringify(config, null, 2);
-  const fd = fs.openSync(tmpFile, 'w');
-  try {
-    fs.writeFileSync(fd, payload, 'utf8');
-    fs.fsyncSync(fd);            // 先落盘再改名，避免 rename 成功但内容还在页缓存里
-  } finally {
-    fs.closeSync(fd);
-  }
-  fs.renameSync(tmpFile, CONFIG_FILE);
-  configMtime = fs.statSync(CONFIG_FILE).mtimeMs;
+// 写串行化：并发保存时让 tmp 文件 / rename 不再交错；并在入队时快照 config 引用，
+// 避免「后到的请求已改写 config、先入队的保存任务却把旧值落盘」的竞态（last-write-wins 仍成立，但不再写花）。
+let saveChain = Promise.resolve();
+let savingNow = false;
+function saveConfig(throwOnError) {
+  const snapshot = config;
+  savingNow = true;
+  // 配置结构变化：下次 findApi 重建路径索引，并清掉已删除接口的命中计数
+  apiIndexDirty = true;
+  pruneHitStats();
+  const run = () => {
+    const tmpFile = CONFIG_FILE + '.tmp';
+    const payload = JSON.stringify(snapshot, null, 2);
+    const fd = fs.openSync(tmpFile, 'w');
+    try {
+      fs.writeFileSync(fd, payload, 'utf8');
+      fs.fsyncSync(fd);            // 先落盘再改名，避免 rename 成功但内容还在页缓存里
+    } finally {
+      fs.closeSync(fd);
+    }
+    fs.renameSync(tmpFile, CONFIG_FILE);
+  };
+  const p = saveChain.then(run).catch((e) => {
+    console.error('[config] 保存失败：', e && e.message ? e.message : e);
+    if (throwOnError) throw e;
+  }).finally(() => {
+    savingNow = false;
+  });
+  saveChain = p.then(() => {}, () => {});
+  return p;
 }
 
 /* ==========================================================================
@@ -334,9 +524,47 @@ function broadcastLogClear() {
   });
 }
 
+/** 体积的可读写法（日志提示用）：1024 → 1KB，1.5MB 之类 */
+function humanBytes(bytes) {
+  if (bytes < 1024) return bytes + 'B';
+  if (bytes < 1024 * 1024) return (bytes / 1024).toFixed(1) + 'KB';
+  return (bytes / (1024 * 1024)).toFixed(1) + 'MB';
+}
+
+/**
+ * 把要进日志的 body 夹到 LOG_BODY_LIMIT 以内。
+ *   返回 { text, truncated, total }；未超限时原样返回（不做任何拷贝）。
+ *   截断只动「日志副本」，调用方回给客户端的那份不受影响。
+ */
+function clampBodyForLog(text) {
+  if (typeof text !== 'string' || !text || LOG_BODY_LIMIT <= 0) {
+    return { text: text, truncated: false, total: 0 };
+  }
+  const buf = Buffer.from(text, 'utf8');
+  if (buf.length <= LOG_BODY_LIMIT) return { text: text, truncated: false, total: buf.length };
+  // 按字节切可能把多字节字符切成两半，toString 会在末尾留 U+FFFD，去掉它保证日志仍是合法文本
+  const kept = buf.subarray(0, LOG_BODY_LIMIT).toString('utf8').replace(/\uFFFD+$/, '');
+  return {
+    text: kept + '\n\n…（日志已截断，仅保留前 ' + humanBytes(LOG_BODY_LIMIT) + '；原文 ' + humanBytes(buf.length) + '，回给调用方的响应体是完整的）',
+    truncated: true,
+    total: buf.length,
+  };
+}
+
 function addLog(entry) {
   entry.id = ++logSeq;
   if (!entry.ts) entry.ts = Date.now();          // 没传 ts 默认使用当前时间
+  /* 日志副本限长（只影响这里留存的一份，不影响已经发出去的响应）：
+   * 截断的同时记一个 truncated 标记，界面上要显式说明「你看到的是半份」，
+   * 否则排查时会拿半份 body 当全份用。 */
+  ['reqBody', 'respBody'].forEach((field) => {
+    // 调用方已经给出精确标记（流式代理只用保留前 N 字节时），不要再按已截短的文本重新推断 total
+    if (entry[field + 'Truncated']) return;
+    const clamped = clampBodyForLog(entry[field]);
+    if (!clamped.truncated) return;
+    entry[field] = clamped.text;
+    entry[field + 'Truncated'] = { kept: LOG_BODY_LIMIT, total: clamped.total };
+  });
   logs.unshift(entry);
   const limit = logLimit();
   if (logs.length > limit) logs.length = limit;
@@ -349,6 +577,24 @@ function addLog(entry) {
  *   所以「规则命中多少次」不会因为日志滚动而失真。重启清零（刻意不落盘，
  *   否则每次请求都要写 config.json，与原子写的目标冲突）。
  * ------------------------------------------------------------------------ */
+/* 接口路径索引：findApi 走它避免每次请求全量线性扫描（Codex 审查点⑨）。
+ * config 结构变化后由 saveConfig / loadConfig 置脏，findApi 懒重建。 */
+let apiPathIndex = new Map();
+let apiIndexDirty = true;
+function rebuildApiIndex() {
+  const map = new Map();
+  for (const api of (config.apis || [])) {
+    if (!api.enabled) continue;
+    const full = apiFullPath(api);
+    if (full) {
+      if (!map.has(full)) map.set(full, []);
+      map.get(full).push(api);
+    }
+  }
+  apiPathIndex = map;
+  apiIndexDirty = false;
+}
+
 const hitStats = new Map();   // key = apiId + '|' + ruleId（兜底用空 ruleId）→ { count, last }
 
 function recordHit(apiId, ruleId) {
@@ -368,6 +614,18 @@ function statsSnapshot() {
     out[item.apiId].total += item.count;
   });
   return out;
+}
+
+/** 接口/规则被删除后，清掉已失效的命中计数（Codex 审查点⑧：命中统计只增不减） */
+function pruneHitStats() {
+  if (hitStats.size === 0) return;
+  if (!config.apis || config.apis.length === 0) { hitStats.clear(); return; }
+  const alive = new Set(config.apis.map((a) => a.id));
+  for (const key of hitStats.keys()) {
+    const sep = key.indexOf('|');
+    const apiId = sep >= 0 ? key.slice(0, sep) : key;
+    if (!alive.has(apiId)) hitStats.delete(key);
+  }
 }
 
 /* --------------------------------------------------------------------------
@@ -394,122 +652,6 @@ function pushChangelog(entry) {
   config.changelog.unshift(item);
   if (config.changelog.length > CHANGELOG_LIMIT) config.changelog.length = CHANGELOG_LIMIT;
   return item;
-}
-
-/** 摘要一条规则的关键信息，用来做「改了哪条」的对比 */
-function ruleFingerprint(rule) {
-  return JSON.stringify({
-    name: rule.name || '',
-    enabled: rule.enabled !== false,
-    match: rule.match || 'all',
-    conditions: rule.conditions || [],
-    response: rule.response || null,
-  });
-}
-
-function apiFingerprint(api) {
-  return JSON.stringify({
-    name: api.name || '',
-    enabled: api.enabled !== false,
-    module: api.module || '',
-    path: api.path || '',
-    desc: api.desc || '',
-    groupId: api.groupId || '',
-    proxy: api.proxy || null,
-    vars: api.vars || null,
-    defaultResponse: api.defaultResponse || null,
-    rules: (api.rules || []).map(ruleFingerprint),
-  });
-}
-
-/**
- * 对比新旧配置，列出这次保存到底改了什么。
- * 返回 { summary, entries } —— entries 直接进变更流水，summary 给保存提示用。
- */
-function diffConfig(before, after) {
-  const entries = [];
-  const oldApis = new Map(((before && before.apis) || []).map((api) => [api.id, api]));
-  const newApis = new Map(((after && after.apis) || []).map((api) => [api.id, api]));
-
-  newApis.forEach((api, id) => {
-    const old = oldApis.get(id);
-    if (!old) {
-      entries.push({ apiId: id, apiName: api.name || '', action: 'api.add', detail: '新增接口（含 ' + (api.rules || []).length + ' 条规则）' });
-      return;
-    }
-    const oldRules = new Map((old.rules || []).map((rule) => [rule.id, rule]));
-    const newRules = new Map((api.rules || []).map((rule) => [rule.id, rule]));
-    newRules.forEach((rule, ruleId) => {
-      const oldRule = oldRules.get(ruleId);
-      if (!oldRule) {
-        entries.push({ apiId: id, apiName: api.name || '', ruleId: ruleId, action: 'rule.add', detail: '新增规则「' + (rule.name || ruleId) + '」' });
-      } else if (ruleFingerprint(oldRule) !== ruleFingerprint(rule)) {
-        const changed = [];
-        if ((oldRule.name || '') !== (rule.name || '')) changed.push('名称');
-        if ((oldRule.enabled !== false) !== (rule.enabled !== false)) changed.push(rule.enabled === false ? '停用' : '启用');
-        if (JSON.stringify(oldRule.conditions || []) !== JSON.stringify(rule.conditions || [])) changed.push('条件');
-        if (oldRule.match !== rule.match) changed.push('匹配方式');
-        if (JSON.stringify(oldRule.response || null) !== JSON.stringify(rule.response || null)) changed.push('响应');
-        entries.push({
-          apiId: id, apiName: api.name || '', ruleId: ruleId, action: 'rule.update',
-          detail: '修改规则「' + (rule.name || ruleId) + '」：' + (changed.join(' / ') || '内容'),
-        });
-      }
-    });
-    oldRules.forEach((rule, ruleId) => {
-      if (!newRules.has(ruleId)) {
-        entries.push({ apiId: id, apiName: api.name || '', ruleId: ruleId, action: 'rule.remove', detail: '删除规则「' + (rule.name || ruleId) + '」' });
-      }
-    });
-    // 规则顺序变了也算一次改动（自上而下命中即停，顺序就是语义）
-    const orderBefore = (old.rules || []).map((rule) => rule.id).join(',');
-    const orderAfter = (api.rules || []).map((rule) => rule.id).join(',');
-    if (orderBefore !== orderAfter && (old.rules || []).length === (api.rules || []).length) {
-      const sameMembers = (old.rules || []).every((rule) => newRules.has(rule.id));
-      if (sameMembers) {
-        entries.push({ apiId: id, apiName: api.name || '', action: 'rule.order', detail: '调整规则顺序' });
-      }
-    }
-    if (apiFingerprint(old) === apiFingerprint(api)) return;
-    if ((old.name || '') !== (api.name || '') || (old.path || '') !== (api.path || '') ||
-        (old.module || '') !== (api.module || '') || (old.desc || '') !== (api.desc || '') ||
-        JSON.stringify(old.proxy || null) !== JSON.stringify(api.proxy || null) ||
-        JSON.stringify(old.vars || null) !== JSON.stringify(api.vars || null) ||
-        JSON.stringify(old.defaultResponse || null) !== JSON.stringify(api.defaultResponse || null) ||
-        (old.groupId || '') !== (api.groupId || '') ||
-        (old.enabled !== false) !== (api.enabled !== false)) {
-      entries.push({ apiId: id, apiName: api.name || '', action: 'api.update', detail: '修改接口设置' });
-    }
-  });
-
-  oldApis.forEach((api, id) => {
-    if (!newApis.has(id)) {
-      entries.push({ apiId: id, apiName: api.name || '', action: 'api.remove', detail: '删除接口（连带 ' + (api.rules || []).length + ' 条规则）' });
-    }
-  });
-
-  return entries;
-}
-
-/** 给这次改动过的接口 / 规则盖上「谁、什么时候」的戳 */
-function stampAuthors(entries, user, ts) {
-  const byApi = new Map();
-  entries.forEach((entry) => {
-    if (!byApi.has(entry.apiId)) byApi.set(entry.apiId, new Set());
-    if (entry.ruleId) byApi.get(entry.apiId).add(entry.ruleId);
-  });
-  byApi.forEach((ruleIds, apiId) => {
-    const api = (config.apis || []).find((row) => row.id === apiId);
-    if (!api) return;
-    api.updatedBy = user || '';
-    api.updatedAt = ts;
-    (api.rules || []).forEach((rule) => {
-      if (ruleIds.has(rule.id)) {
-        rule.updatedBy = user || '';
-        rule.updatedAt = ts;
-      }
-    });
-  });
 }
 
 /** 变更流水的取用入口：倒序、可按接口过滤 */
@@ -553,272 +695,73 @@ function seedHistoricalLogs() {
 }
 
 /* ==========================================================================
- * 三、JSON 路径取值
- *   支持 a.b.c、a[0].b、a[*].b（数组通配，收集全部匹配值）
- *   取值统一返回数组：无匹配为空数组，条件判断里"任一命中即为真"
+ * 三、JSON 路径取值 + 四、条件匹配 —— 实现见 lib/matching.js
+ *   （纯函数，无状态依赖：tokenizePath / pick / evalCondition / matchRules）
  * ========================================================================== */
-
-const PATH_TOKEN_RE = /([^.[\]]+)|\[(\*|\d+)\]/g;
-
-function tokenizePath(expr) {
-  const text = String(expr || '').trim().replace(/^\$\.?/, '');
-  const tokens = [];
-  let matched;
-  PATH_TOKEN_RE.lastIndex = 0;
-  while ((matched = PATH_TOKEN_RE.exec(text)) !== null) {
-    if (matched[1] !== undefined) {
-      tokens.push({ kind: 'key', value: matched[1] });
-    } else if (matched[2] === '*') {
-      tokens.push({ kind: 'wild' });
-    } else {
-      tokens.push({ kind: 'index', value: Number(matched[2]) });
-    }
-  }
-  return tokens;
-}
-
-/** 从 node 上按 tokens 递归收集取值 */
-function collectValues(node, tokens, out) {
-  if (tokens.length === 0) {
-    out.push(node);
-    return;
-  }
-  if (node === null || node === undefined) return;
-
-  const head = tokens[0];
-  const rest = tokens.slice(1);
-
-  if (head.kind === 'key') {
-    if (Array.isArray(node)) {
-      // 数组上直接取字段：自动逐元素展开（写 list.name 也能拿到所有 name）
-      node.forEach((item) => collectValues(item, tokens, out));
-    } else if (typeof node === 'object') {
-      collectValues(node[head.value], rest, out);
-    }
-    return;
-  }
-
-  if (head.kind === 'index') {
-    if (Array.isArray(node)) collectValues(node[head.value], rest, out);
-    return;
-  }
-
-  // wild：数组逐元素 / 对象逐值
-  if (Array.isArray(node)) {
-    node.forEach((item) => collectValues(item, rest, out));
-  } else if (typeof node === 'object') {
-    Object.keys(node).forEach((key) => collectValues(node[key], rest, out));
-  }
-}
-
-function pick(source, expr) {
-  if (source === null || source === undefined) return [];
-  if (typeof source !== 'object') {
-    // 原始字符串（如 raw 请求体）只能整体比较，表达式无意义
-    return [source];
-  }
-  const out = [];
-  collectValues(source, tokenizePath(expr), out);
-  return out.filter((value) => value !== undefined);
-}
-
 /* ==========================================================================
- * 四、条件匹配
+ * 五、响应渲染 —— 实现见 lib/render.js
+ *   （FAULT_TYPES 也随之搬走，配置层从那里 import，避免常量两处定义）
  * ========================================================================== */
-
-function compareOne(actual, op, expected) {
-  const text = actual === null || actual === undefined ? '' : String(actual);
-  const expectText = expected === null || expected === undefined ? '' : String(expected);
-
-  switch (op) {
-    case 'eq':
-    case 'ne': {
-      // 数字优先：双方都能转成数字时按数值比较（避免 "100" != 100）
-      const a = Number(text), b = Number(expectText);
-      const equal = (text !== '' && expectText !== '' && !Number.isNaN(a) && !Number.isNaN(b))
-        ? a === b
-        : text.trim() === expectText.trim();
-      return op === 'eq' ? equal : !equal;
-    }
-    case 'contains': return text.includes(expectText);
-    case 'notContains': return !text.includes(expectText);
-    case 'startsWith': return text.startsWith(expectText);
-    case 'endsWith': return text.endsWith(expectText);
-    case 'regex':
-      try { return new RegExp(expectText).test(text); } catch (e) { return false; }
-    case 'in': return expectText.split(',').map((s) => s.trim()).some((s) => s === text.trim());
-    case 'notIn': return !expectText.split(',').map((s) => s.trim()).some((s) => s === text.trim());
-    case 'gt': return Number(text) > Number(expectText);
-    case 'gte': return Number(text) >= Number(expectText);
-    case 'lt': return Number(text) < Number(expectText);
-    case 'lte': return Number(text) <= Number(expectText);
-    default: return false;
-  }
-}
-
-function evalCondition(condition, ctx) {
-  const op = condition.op || 'eq';
-  // 前端把"请求头"来源写作 header，上下文里存的是 headers，这里做一次映射
-  const sourceKey = condition.source === 'header' ? 'headers' : condition.source;
-  const values = condition.source === 'raw'
-    ? [ctx.raw]
-    : pick(ctx[sourceKey] || {}, condition.path);
-
-  if (op === 'exists') {
-    return values.some((v) => v !== null && v !== undefined && String(v) !== '');
-  }
-  if (op === 'notExists') {
-    return !values.some((v) => v !== null && v !== undefined && String(v) !== '');
-  }
-  if (op === 'empty') {
-    return values.length === 0 || values.every((v) => v === null || v === undefined || String(v) === '');
-  }
-  if (op === 'notEmpty') {
-    return values.some((v) => v !== null && v !== undefined && String(v) !== '');
-  }
-  return values.some((value) => compareOne(value, op, condition.value));
-}
-
-/** 生成判定说明，供"试打一枪"的链路展示 */
-function describeMatch(rule, hit) {
-  if (rule.conditions.length === 0) return '无条件 · 恒命中';
-  const joiner = rule.match === 'any' ? '任一条件' : '全部条件';
-  if (hit) return joiner + '满足';
-  return rule.match === 'any' ? '条件均不满足' : '存在条件不满足';
-}
-
-/** 返回 { rule, trace } —— trace 记录每条规则的判定结果，供"试打一枪"展示 */
-function matchRules(api, ctx) {
-  const trace = [];
-  for (const rule of api.rules) {
-    if (!rule.enabled) {
-      trace.push({ ruleId: rule.id, ruleName: rule.name, hit: false, reason: '规则已停用' });
-      continue;
-    }
-    const results = rule.conditions.map((condition) => evalCondition(condition, ctx));
-    const hit = rule.conditions.length === 0
-      ? true
-      : (rule.match === 'any' ? results.some(Boolean) : results.every(Boolean));
-    trace.push({
-      ruleId: rule.id,
-      ruleName: rule.name,
-      hit,
-      reason: describeMatch(rule, hit),
-    });
-    if (hit) return { rule, trace };
-  }
-  return { rule: null, trace };
-}
-
-/* ==========================================================================
- * 五、响应渲染
- * ========================================================================== */
-
-/** 模板变量：{{body.x}} {{query.x}} {{header.host}} {{vars.x}} {{now}} {{ts}} {{uuid}} {{random}} */
-function renderTemplate(text, ctx) {
-  return String(text).replace(/\{\{\s*([^}]+?)\s*\}\}/g, (whole, expr) => {
-    const key = expr.trim();
-    try {
-      if (key === 'now') return new Date().toLocaleString('zh-CN', { hour12: false });
-      if (key === 'ts') return String(Date.now());
-      if (key === 'uuid') return crypto.randomUUID();
-      if (key === 'random') return String(Math.floor(Math.random() * 1000000));
-
-      const dot = key.indexOf('.');
-      if (dot > 0) {
-        const head = key.slice(0, dot);
-        const rest = key.slice(dot + 1);
-        let node = null;
-        if (head === 'body') node = ctx.body;
-        else if (head === 'query') node = ctx.query;
-        else if (head === 'header') node = ctx.headers;
-        else if (head === 'vars') node = ctx.vars;
-        if (node !== null) {
-          const values = pick(node, rest);
-          const value = values[0];
-          if (value === undefined || value === null) return '';
-          return typeof value === 'object' ? JSON.stringify(value) : String(value);
-        }
-      }
-      return '';
-    } catch (e) {
-      return whole;
-    }
-  });
-}
-
-const helpers = {
-  uuid: () => crypto.randomUUID(),
-  now: () => new Date().toISOString(),
-  randomInt: (min, max) => Math.floor(Math.random() * (max - min + 1)) + min,
-  base64: (text) => Buffer.from(String(text), 'utf8').toString('base64'),
-  pick,
-};
-
-/**
- * 生成响应。两种模式：
- *   static —— 响应体按 {{}} 模板替换
- *   script —— 响应体由一小段 JS 生成，可访问 ctx.body / ctx.query / ctx.headers / ctx.vars
- *             （内网测试工具，直接执行；不要把管理端口暴露到公网）
- */
-function renderResponse(response, ctx) {
-  /* 延迟：delayMaxMs > delayMs 时按区间随机（如 800~1200 模拟真实抖动），否则就是固定值。
-   * 这里算出来的延迟是「本次实际等待」，试打结果与请求日志展示的也是它。 */
-  const minDelay = Math.max(0, Number(response.delayMs) || 0);
-  const maxDelay = Math.max(minDelay, Number(response.delayMaxMs) || 0);
-  const result = {
-    status: Number(response.status) || 200,
-    contentType: response.contentType || 'application/json;charset=UTF-8',
-    delayMs: maxDelay > minDelay ? minDelay + Math.floor(Math.random() * (maxDelay - minDelay + 1)) : minDelay,
-    delayMinMs: minDelay,
-    delayMaxMs: maxDelay,
-    fault: FAULT_TYPES.indexOf(response.fault) >= 0 ? response.fault : 'none',
-    body: '',
-    error: null,
-  };
-
-  if (response.mode === 'script') {
-    try {
-      const fn = new Function('ctx', 'helpers', response.script || 'return {};');
-      const out = fn(ctx, helpers);
-      result.body = typeof out === 'string' ? out : JSON.stringify(out);
-    } catch (err) {
-      result.status = 500;
-      result.error = String(err && err.message ? err.message : err);
-      result.body = JSON.stringify({ mockError: '脚本执行失败', detail: result.error });
-    }
-  } else {
-    result.body = renderTemplate(response.body || '', ctx);
-  }
-  return result;
-}
-
-/**
- * 畸形响应体：截掉一半并去掉尾部的闭合符，让客户端 JSON.parse 必然失败。
- * 用来模拟「上游返回了半截 JSON」这种真实故障，客户端应当表现为解析错误而不是拿到空对象。
- */
-function malformedBody(body) {
-  const text = String(body === undefined || body === null ? '' : body);
-  const cut = Math.max(1, Math.floor(text.length / 2));
-  return text.slice(0, cut).replace(/[\s}\]]+$/, '');
-}
-
 /* ==========================================================================
  * 六、请求解析
  * ========================================================================== */
 
+/**
+ * 读取请求体。
+ *
+ * 超过 MAX_BODY 时必须**仍然 resolve**：早期版本在这里直接 `req.destroy()` 就 return，
+ * 实测 'end' 与 'error' 都不会再触发 → Promise 永不 settle → 调用方（handleMock 首行的
+ * await）永远挂住 → 该请求既不进请求日志也不回任何响应，客户端只看到 EPIPE。
+ * 对挡板来说"请求凭空消失"是最难排查的一类现象，所以现在：
+ *   1. 打上 req.__bodyTooLarge 标记并立刻 resolve('')，让调用方继续走、回一个 413；
+ *   2. 用 req.resume() 把余下的数据读掉丢弃——不这样做的话连接里塞着未读数据，
+ *      响应可能发不出去，keep-alive 也会错乱。
+ */
 function readRawBody(req) {
   return new Promise((resolve) => {
     const chunks = [];
     let size = 0;
+    let settled = false;
+    const finish = (value) => {
+      if (settled) return;
+      settled = true;
+      resolve(value);
+    };
     req.on('data', (chunk) => {
+      if (settled) return;
       size += chunk.length;
-      if (size > MAX_BODY) { req.destroy(); return; }
+      if (size > MAX_BODY) {
+        chunks.length = 0;              // 已收的部分也丢掉，不留在内存里
+        req.__bodyTooLarge = true;
+        finish('');
+        req.resume();                   // 继续读掉并丢弃剩余数据，保证连接可正常回包
+        return;
+      }
       chunks.push(chunk);
     });
-    req.on('end', () => resolve(Buffer.concat(chunks).toString('utf8')));
-    req.on('error', () => resolve(''));
+    req.on('end', () => finish(Buffer.concat(chunks).toString('utf8')));
+    req.on('error', () => finish(''));
+    /* 兜底：客户端中途断开时 'end'/'error' 之外还有 'close'，补一条保证 Promise 一定 settle */
+    req.on('close', () => finish(''));
   });
+}
+
+/** 请求体超限时的统一回应（挡板与管理接口共用），并写一条日志让人能看见这次请求 */
+function rejectTooLarge(req, res, info) {
+  const message = '请求体超过上限 ' + Math.round(MAX_BODY / 1024 / 1024) + 'MB，本请求未被处理';
+  addLog({
+    kind: info.kind,
+    apiId: info.apiId || null,
+    apiName: info.apiName || '',
+    pathname: info.pathname,
+    method: req.method,
+    status: 413,
+    ms: Date.now() - (info.startedAt || Date.now()),
+    reqBody: '（请求体过大，已丢弃，未留存）',
+    respBody: message,
+    ip: clientIp(req),
+  });
+  sendText(res, 413, message);
 }
 
 function buildContext(req, url, raw) {
@@ -847,13 +790,12 @@ function apiFullPath(api) {
   return [api.module, api.path].filter(Boolean).join('/').replace(/^\/+|\/+$/g, '');
 }
 
-function findApi(pathname) {
+function findApi(pathname, method) {
+  if (apiIndexDirty) rebuildApiIndex();
   const target = pathname.replace(/^\/+/, '').replace(/\/+$/, '');
-  for (const api of config.apis) {
-    if (!api.enabled) continue;
-    if (apiFullPath(api) === target) return api;
-  }
-  return null;
+  const candidates = apiPathIndex.get(target) || [];
+  // 同一路径下按配置顺序取第一个 method 命中的接口；ALL 在后仍可能被前面的特定方法/ALL 遮蔽
+  return candidates.find((api) => apiMethodMatches(api, method)) || null;
 }
 
 /* ==========================================================================
@@ -885,13 +827,33 @@ function effectiveProxyUrl(api) {
   return (group && group.proxyUrl) || '';
 }
 
-function proxyPass(api, req, url, raw) {
+/* 代理响应里不能直接转发的 hop-by-hop 头，否则 keep-alive / transfer-encoding 会串层 */
+const PROXY_HOP_HEADERS = new Set([
+  'connection', 'keep-alive', 'proxy-authenticate', 'proxy-authorization',
+  'te', 'trailer', 'transfer-encoding', 'upgrade',
+]);
+
+function filterProxyHeaders(headers) {
+  const out = {};
+  for (const key of Object.keys(headers || {})) {
+    if (!PROXY_HOP_HEADERS.has(key.toLowerCase())) out[key] = headers[key];
+  }
+  return out;
+}
+
+/** 流式代理：不等整份响应缓冲，直接把上游字节 pipe 给客户端；
+ *  日志只保留前 LOG_BODY_LIMIT 字节的文本副本，避免大文件/二进制把内存和日志撑爆。 */
+function proxyPass(api, req, url, raw, res) {
   return new Promise((resolve, reject) => {
+    /* 必须用「实际生效」的上游地址，而不是接口自己那一格：
+     * handleMock 是按 effectiveProxyUrl(api) 判断该不该代理的，接口 URL 留空、靠分组继承时，
+     * 这里若只看 api.proxy.url 就会拿着空串去 new URL，白报一句「代理地址不合法」。 */
+    const upstream = effectiveProxyUrl(api);
     let target;
     try {
-      target = new URL(api.proxy.url);
+      target = new URL(upstream);
     } catch (e) {
-      reject(new Error('代理地址不合法：' + api.proxy.url));
+      reject(new Error('代理地址不合法：' + upstream));
       return;
     }
     const basePath = target.pathname.replace(/\/+$/, '');
@@ -906,16 +868,65 @@ function proxyPass(api, req, url, raw) {
     };
     const client = target.protocol === 'https:' ? https : http;
     const proxyReq = client.request(options, (proxyRes) => {
-      const chunks = [];
-      proxyRes.on('data', (chunk) => chunks.push(chunk));
-      proxyRes.on('end', () => resolve({
-        status: proxyRes.statusCode,
-        headers: proxyRes.headers,
-        body: Buffer.concat(chunks).toString('utf8'),
-      }));
+      if (res.headersSent) {
+        proxyRes.resume();
+        reject(new Error('客户端已开始响应，无法再写入代理结果'));
+        return;
+      }
+
+      const headers = filterProxyHeaders(proxyRes.headers);
+      res.writeHead(proxyRes.statusCode, headers);
+
+      /* 日志预览：只保留前 LOG_BODY_LIMIT 字节文本；totalSeen 仍统计完整字节数。 */
+      const logCap = LOG_BODY_LIMIT > 0 ? LOG_BODY_LIMIT : Number.MAX_SAFE_INTEGER;
+      const logPieces = [];
+      let logBytes = 0;
+      let totalSeen = 0;
+      proxyRes.on('data', (chunk) => {
+        totalSeen += chunk.length;
+        if (logBytes < logCap) {
+          const take = Math.min(chunk.length, logCap - logBytes);
+          logPieces.push(chunk.subarray(0, take));
+          logBytes += take;
+        }
+      });
+      proxyRes.on('end', () => {
+        const logBuf = Buffer.concat(logPieces);
+        let body = logBuf.toString('utf8');
+        let respBodyTruncated = null;
+        if (LOG_BODY_LIMIT > 0 && totalSeen > logBuf.length) {
+          body = body.replace(/\uFFFD+$/, '');
+          body = body + '\n\n…（日志已截断，仅保留前 ' + humanBytes(LOG_BODY_LIMIT)
+            + '；原文 ' + humanBytes(totalSeen) + '，回给调用方的响应体是完整的）';
+          respBodyTruncated = { kept: logBuf.length, total: totalSeen };
+        }
+        resolve({
+          status: proxyRes.statusCode,
+          headers,
+          body,
+          respBodyTruncated,
+        });
+      });
+      proxyRes.on('error', (err) => {
+        if (!res.headersSent) {
+          reject(err);
+        } else {
+          res.destroy(err);
+          resolve({
+            status: proxyRes.statusCode || 502,
+            headers,
+            body: err && err.message ? err.message : '代理响应流中断',
+            respBodyTruncated: null,
+          });
+        }
+      });
+
+      proxyRes.pipe(res);
     });
     proxyReq.on('timeout', () => proxyReq.destroy(new Error('代理请求超时')));
     proxyReq.on('error', reject);
+    // 客户端断开才销毁：不能用 req.on('close')，它会在请求体读完后就触发，导致上游流被提前截断
+    res.on('close', () => proxyReq.destroy());
     if (raw) proxyReq.write(raw);
     proxyReq.end();
   });
@@ -928,12 +939,16 @@ function proxyPass(api, req, url, raw) {
 async function handleMock(req, res, url) {
   const started = Date.now();
   const raw = await readRawBody(req);
-  const api = findApi(url.pathname);
+  if (req.__bodyTooLarge) { rejectTooLarge(req, res, { kind: 'unmatched', pathname: url.pathname, startedAt: started }); return; }
+  const api = findApi(url.pathname, req.method);
 
+  /* 路径没匹配到任何接口 → 404。
+   * 不用 500：500 会让调用方以为「挡板内部出故障」，而事实是「这个路径压根没配 mock」，
+   * 调用方应该去补接口或改路径。真需要模拟 500 时，配一个接口把状态码写成 500 即可。 */
   if (!api) {
     const message = '模块/接口：' + url.pathname + '，未配置 mock';
-    addLog({ kind: 'unmatched', pathname: url.pathname, method: req.method, status: 500, ms: Date.now() - started, reqBody: raw, respBody: message, ip: clientIp(req) });
-    sendText(res, 500, message);
+    addLog({ kind: 'unmatched', pathname: url.pathname, method: req.method, status: 404, ms: Date.now() - started, reqBody: raw, respBody: message, ip: clientIp(req) });
+    sendText(res, 404, message);
     return;
   }
 
@@ -941,11 +956,23 @@ async function handleMock(req, res, url) {
   // 上游地址接口没填则继承分组默认（A9），两边都空才认为没配代理。
   if (api.proxy && api.proxy.enable && effectiveProxyUrl(api)) {
     try {
-      const result = await proxyPass(api, req, url, raw);
-      addLog({ kind: 'proxy', apiId: api.id, apiName: api.name, pathname: url.pathname, method: req.method, status: result.status, ms: Date.now() - started, reqBody: raw, respBody: result.body, ip: clientIp(req) });
-      res.writeHead(result.status, Object.assign({}, result.headers));
-      res.end(result.body);
+      const result = await proxyPass(api, req, url, raw, res);
+      const logEntry = {
+        kind: 'proxy',
+        apiId: api.id,
+        apiName: api.name,
+        pathname: url.pathname,
+        method: req.method,
+        status: result.status,
+        ms: Date.now() - started,
+        reqBody: raw,
+        respBody: result.body,
+        ip: clientIp(req),
+      };
+      if (result.respBodyTruncated) logEntry.respBodyTruncated = result.respBodyTruncated;
+      addLog(logEntry);
     } catch (err) {
+      if (res.headersSent) { res.destroy(); return; }
       const message = '代理失败：' + (err && err.message ? err.message : err);
       addLog({ kind: 'proxy', apiId: api.id, apiName: api.name, pathname: url.pathname, method: req.method, status: 502, ms: Date.now() - started, reqBody: raw, respBody: message, ip: clientIp(req) });
       sendText(res, 502, message);
@@ -967,6 +994,37 @@ async function handleMock(req, res, url) {
    * 故障排在延迟之后：延迟照常生效，故障再覆盖真实的网络行为。 */
   const fault = rendered.fault || 'none';
 
+  /* 本次请求会不会「挂住连接」：延迟要等，timeout 故障还要在延迟之后再挂满 FAULT_TIMEOUT_MS。
+   * abort / malformed 都是立刻断开或立刻返回，不占连接，所以不参与计数。 */
+  const holdMs = rendered.delayMs + (fault === 'timeout' ? FAULT_TIMEOUT_MS : 0);
+
+  /* 到顶之后不排队：挡板对联调方应该「明确报错」而不是「悄悄变了行为」，
+   * 排队会让对方以为配置没生效，所以直接 503 并把原因写进消息和日志。 */
+  if (holdMs > 0 && heldRequests >= MAX_HELD_REQUESTS) {
+    const message = '同时挂起的请求已达上限 ' + MAX_HELD_REQUESTS + ' 个，本次请求未按配置挂起'
+      + '（延迟 ' + rendered.delayMs + 'ms' + (fault === 'timeout' ? ' + 故障 timeout' : '') + '）。'
+      + '挂起的连接过多会把挡板的文件描述符占满，导致管理界面一起不可用。';
+    addLog({
+      kind: 'mock',
+      apiId: api.id,
+      apiName: api.name,
+      pathname: url.pathname,
+      method: req.method,
+      ruleId: rule ? rule.id : null,
+      ruleName: rule ? rule.name : '（兜底响应）',
+      status: 503,                 // 实际返回码：不是配置里写的那一个
+      ms: Date.now() - started,
+      reqBody: raw,
+      respBody: message,
+      fault: fault,
+      holdRejected: true,
+      trace,
+      ip: clientIp(req),
+    });
+    sendText(res, 503, message);
+    return;
+  }
+
   addLog({
     kind: 'mock',
     apiId: api.id,
@@ -984,14 +1042,23 @@ async function handleMock(req, res, url) {
     ip: clientIp(req),
   });
 
-  if (rendered.delayMs > 0) await sleep(rendered.delayMs);
+  /* 挂起期间计数：上限看的只是「此刻挂住多少个」，所以进出必须成对。
+   * 放在 try/finally 里而不是每条 return 前各减一次——abort / timeout 都会提前返回。 */
+  if (holdMs > 0) {
+    heldRequests += 1;
+    try {
+      if (rendered.delayMs > 0) await sleep(rendered.delayMs);
+      if (fault === 'timeout') await sleep(FAULT_TIMEOUT_MS);
+    } finally {
+      heldRequests -= 1;
+    }
+  }
 
   if (fault === 'abort') {
     if (res.socket) res.socket.destroy();      // 客户端表现为连接被重置（ECONNRESET）
     return;
   }
   if (fault === 'timeout') {
-    await sleep(FAULT_TIMEOUT_MS);             // 挂起不返回，客户端表现为请求超时
     if (!res.writableEnded && res.socket) res.socket.destroy();
     return;
   }
@@ -1006,13 +1073,24 @@ async function handleMock(req, res, url) {
 }
 
 function clientIp(req) {
-  return (req.headers['x-forwarded-for'] || '').split(',')[0].trim()
-    || (req.socket && req.socket.remoteAddress)
-    || '-';
+  // 只有显式配置 MOCK_TRUST_PROXY=1 才信任反向代理头，否则登录限速/日志 IP 容易被伪造
+  if (process.env.MOCK_TRUST_PROXY === '1') {
+    const xff = (req.headers['x-forwarded-for'] || '').split(',')[0].trim();
+    if (xff) return xff;
+  }
+  return (req.socket && req.socket.remoteAddress) || '-';
 }
 
 function sleep(ms) {
   return new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+// 可被 AbortSignal 提前唤醒的 sleep（用于「挂起期间客户端断开」时立即释放名额）
+function sleepAbortable(ms, signal) {
+  return new Promise((resolve) => {
+    const t = setTimeout(resolve, ms);
+    if (signal) signal.addEventListener('abort', () => { clearTimeout(t); resolve(); }, { once: true });
+  });
 }
 
 function sendJson(res, status, data) {
@@ -1039,6 +1117,15 @@ async function handleAdmin(req, res, url) {
   const route = url.pathname.slice(ADMIN_PREFIX.length) || '/';
   const raw = await readRawBody(req);
 
+  /* 超限请求同样要「有人应答」：回 413 + 写日志，不能让它静默消失（见 readRawBody 注释）。
+   * 配置 JSON 正常只有几十 KB，走到这里通常是传错了文件。 */
+  if (req.__bodyTooLarge) {
+    const message = '请求体超过上限 ' + Math.round(MAX_BODY / 1024 / 1024) + 'MB，已拒绝（配置文件正常只有几十 KB，请检查是否传错）';
+    addLog({ kind: 'admin', pathname: url.pathname, method: req.method, status: 413, ms: 0, reqBody: '（请求体过大，已丢弃，未留存）', respBody: message, ip: clientIp(req) });
+    sendJson(res, 413, { ok: false, message: message });
+    return;
+  }
+
   // 只读隔离端口（req.__ro）：仅放行 GET 读操作，登录与任何写操作（改配置、增删分享等）一律拒绝，
   // 确保该端口永远无法变成可编辑面板——即便对方把 URL 上的 ?share= 去掉也一样只读。
   if (req.__ro && (req.method !== 'GET' || route === '/login')) {
@@ -1051,19 +1138,10 @@ async function handleAdmin(req, res, url) {
       // 只读隔离端口：永远 readonly、无需登录、无管理员身份（与去掉 ?share= 也只读的目标一致）
       const required = req.__ro ? false : needAuth();
       const loggedIn = required ? isLoggedIn(req) : true;
-      // 只读端口安全策略：必须携带有效分享令牌才允许查看内容；
-      // 无令牌或令牌失效时，前端应展示「需要分享链接」提示页，而非完整的只读配置面板。
-      // 注意：前端发起 /_admin/auth 时，分享令牌放在 Authorization: Bearer 头里（页面 URL 的 ?share=
-      //       仅用于初始识别，fetch 的 auth 请求 URL 是 /_admin/auth 不带 ?share=）；因此需同时
-      //       检查 req.url 的 ?share= 参数与 Bearer 头，二者任一为有效令牌即可。
-      let hasValidShare = !req.__ro;
-      if (req.__ro && !hasValidShare) {
-        const urlHit = /[?&]share=([^&]+)/.exec(req.url || '');
-        const urlToken = urlHit ? decodeURIComponent(urlHit[1]) : '';
-        const bearerToken = extractToken(req); // 读 Authorization: Bearer <shareToken>
-        const token = urlToken || bearerToken;
-        hasValidShare = !!token && !!findShareToken(token);
-      }
+      // 只读端口安全策略：必须携带有效分享令牌才允许查看内容；无令牌或令牌失效时，
+      // 前端应展示「需要分享链接」提示页，而非完整的只读配置面板。
+      // 判定统一走 roShareOk()（同时认 ?share= 与 Bearer 头，别在这里另写一份）。
+      const hasValidShare = roShareOk(req);
       sendJson(res, 200, {
         ok: true,
         required: required,
@@ -1084,8 +1162,22 @@ async function handleAdmin(req, res, url) {
     return;
   }
 
+  /* 只读隔离端口：除 /auth（前端要靠它判断该显示提示页还是只读面板）之外，一律要求有效分享令牌。
+   * 这道拦截必须在服务端：只读端口的「需要分享链接」原先只是前端渲染的提示页，
+   * 直接 curl 打 /_admin/config、/_admin/share 仍能拿到全量配置（含口令哈希与全部令牌）。 */
+  if (!roShareOk(req)) {
+    sendJson(res, 403, { ok: false, readonly: true, shareRequired: true, message: '只读端口需要有效的分享链接' });
+    return;
+  }
+
   // 登录
   if (route === '/login' && req.method === 'POST') {
+    // 登录失败限速：窗口内连续失败过多直接拒绝（缓解撞库），先于口令校验生效
+    const loginIp = clientIp(req);
+    if (!checkLoginAllowed(loginIp)) {
+      sendJson(res, 429, { ok: false, message: '登录尝试过于频繁，请稍后再试' });
+      return;
+    }
     try {
       const input = JSON.parse(raw || '{}');
       const username = (input.username || '').trim();
@@ -1095,7 +1187,8 @@ async function handleAdmin(req, res, url) {
       if (ADMIN_PASSWORD) {
         // 用户名放宽：允许省略（旧版前端只发密码），也允许等于 MOCK_ADMIN_USER
         const userOk = (username === '' || username === ADMIN_USER);
-        if (userOk && password === ADMIN_PASSWORD) {
+        if (userOk && safeEqual(password, ADMIN_PASSWORD)) {
+          resetLoginFails(loginIp);
           sendJson(res, 200, { ok: true, token: issueToken(ADMIN_USER, true), username: ADMIN_USER, isDeployAdmin: true, message: '登录成功' });
           return;
         }
@@ -1103,19 +1196,22 @@ async function handleAdmin(req, res, url) {
 
       // 2) config.json 的 users 数组（可多个账号）
       const users = (config.users || []).filter((u) => u && u.username);
-      const hit = users.find((u) => u.username === username && sha256Hex(password) === u.passwordHash);
+      const hit = users.find((u) => u.username === username && verifyPassword(password, u.passwordHash));
       if (hit) {
+        resetLoginFails(loginIp);
         sendJson(res, 200, { ok: true, token: issueToken(username, false), username: username, isDeployAdmin: false, message: '登录成功' });
         return;
       }
 
       // 3) 两者都没配置：保持开放（无登录保护）
       if (!ADMIN_PASSWORD && !users.length) {
+        resetLoginFails(loginIp);
         sendJson(res, 200, { ok: true, token: issueToken('', false), username: '', isDeployAdmin: false, message: '登录成功' });
         return;
       }
 
-      // 统一提示，避免用户名枚举
+      // 统一提示，避免用户名枚举；同时记录失败次数用于限速
+      registerLoginFail(loginIp);
       sendJson(res, 401, { ok: false, message: '用户名或密码错误' });
     } catch (e) {
       sendJson(res, 400, { ok: false, message: '登录请求格式错误' });
@@ -1126,6 +1222,14 @@ async function handleAdmin(req, res, url) {
   // 其余管理接口需要登录
   if (!isLoggedIn(req)) {
     authJson(res, needAuth());
+    return;
+  }
+
+  // 服务端登出：销毁当前会话令牌（前端清本地 token 之外，让令牌立即失效，而非等 24h TTL）
+  if (route === '/session' && req.method === 'DELETE') {
+    const t = extractToken(req);
+    if (t) sessions.delete(t);
+    sendJson(res, 200, { ok: true, message: '已退出登录' });
     return;
   }
 
@@ -1173,7 +1277,7 @@ async function handleAdmin(req, res, url) {
         if (name.length > 64) { sendJson(res, 400, { ok: false, message: '用户名过长（建议 <= 64 字符）' }); return; }
         if (!Array.isArray(config.users)) config.users = [];
         const idx = config.users.findIndex((u) => u && u.username === name);
-        const item = { username: name, passwordHash: sha256Hex(password) };
+        const item = { username: name, passwordHash: hashPassword(password) };
         if (idx >= 0) config.users[idx] = item; else config.users.push(item);
         saveConfig();
         sendJson(res, 200, {
@@ -1213,7 +1317,14 @@ async function handleAdmin(req, res, url) {
       sendJson(res, 403, { ok: false, shareInvalid: true, message: '分享链接已失效或已被撤销' });
       return;
     }
-    sendJson(res, 200, config);
+    /* 敏感字段不下发：users 的口令哈希、shareTokens 的令牌本身都不该出现在读接口里
+     * （原先任何登录用户、乃至持只读分享令牌的人都能整份拿到，等于把撞库原料和别人的令牌一起送出去）。
+     * 前端从不读这两个字段——用户清单走 /_admin/users、分享清单走 /_admin/share——
+     * 保存时由 POST /config 从服务端内存 carry 回来，所以这里删掉不会丢数据。 */
+    const view = Object.assign({}, config);
+    delete view.users;
+    delete view.shareTokens;
+    sendJson(res, 200, view);
     return;
   }
 
@@ -1223,6 +1334,22 @@ async function handleAdmin(req, res, url) {
       const next = JSON.parse(raw);
       next.groups = normalizeGroups(next.groups);
       next.apis = (next.apis || []).map(normalizeApi);
+
+      /* 乐观并发控制：前端提交的是它加载时看到的版本。
+       * 期间有人先保存过（rev 已 +1），这次提交就基于过期快照，返回 409 让前端重新载入，
+       * 避免两个浏览器各改一条规则、后保存的把先保存的静默覆盖。 */
+      const currentRev = configRev();
+      const incomingRev = Number(next.meta && next.meta.rev) || 0;
+      if (incomingRev !== currentRev) {
+        sendJson(res, 409, {
+          ok: false,
+          conflict: true,
+          currentRev: currentRev,
+          message: '配置已被其他人更新（当前版本 ' + currentRev + '，你提交的版本 ' + incomingRev
+            + '），已重新载入最新配置，请基于最新内容重新修改再保存',
+        });
+        return;
+      }
 
       /* 保存前先比对，落一份「谁在什么时候改了什么」。
        * 前端每次编辑都整份提交，靠服务端 diff 才能知道真实改动，
@@ -1235,19 +1362,29 @@ async function handleAdmin(req, res, url) {
        * 而它只渲染自己关心的字段，这两样不主动带过去就会被冲掉。 */
       const carried = Array.isArray(config.changelog) ? config.changelog : [];
       const carriedTokens = Array.isArray(config.shareTokens) ? config.shareTokens : [];
+      const carriedUsers = Array.isArray(config.users) ? config.users : [];
       config = next;
       config.changelog = carried.slice(0, CHANGELOG_LIMIT);
       config.shareTokens = carriedTokens;
+      // users 同理：读接口已不下发它，前端整份提交里也就没有，必须由服务端补回来，否则一次保存就把账号清空
+      config.users = carriedUsers;
       config.logSize = logLimitOf(next.logSize);
+      config.meta = Object.assign({}, next.meta || {}, { rev: currentRev + 1 });
 
-      stampAuthors(entries, who, ts);
+      stampAuthors(entries, who, ts, config.apis);
       entries.forEach((entry) => pushChangelog(Object.assign({ by: who, ts: ts }, entry)));
 
-      saveConfig();
+      try {
+        await saveConfig(true);
+      } catch (saveErr) {
+        sendJson(res, 500, { ok: false, message: '配置保存失败：' + (saveErr && saveErr.message ? saveErr.message : saveErr) });
+        return;
+      }
       sendJson(res, 200, {
         ok: true,
         message: '配置已保存并生效',
         changed: entries.length,
+        rev: configRev(),
       });
     } catch (err) {
       sendJson(res, 400, { ok: false, message: '配置格式错误：' + err.message });
@@ -1273,6 +1410,12 @@ async function handleAdmin(req, res, url) {
    * 写操作已被上面的「只读身份拦截」挡住，所以分享链接自己无法再生成分享链接。 */
   if (route === '/share') {
     if (req.method === 'GET') {
+      /* 令牌清单只给「可编辑身份」看：持一条只读分享链接的人（或只读端口）不该能枚举全部令牌，
+       * 否则拿到任意一条只读链接就等于拿到所有链接的抄本。 */
+      if (req.__ro || isShareRequest(req)) {
+        sendJson(res, 403, { ok: false, readonly: true, message: '只读身份不能查看分享令牌清单' });
+        return;
+      }
       const items = shareTokens().map((row) => ({
         token: row.token,
         label: row.label || '',
@@ -1460,19 +1603,45 @@ function isStaticPath(pathname) {
   return STATIC_EXTENSION.test(pathname);
 }
 
-function serveStatic(res, pathname) {
+function serveStatic(req, res, pathname) {
   const relative = pathname === '/' ? 'index.html' : pathname.replace(/^\/+/, '');
-  const filePath = path.join(PUBLIC_DIR, path.normalize(relative));
 
-  // 防目录穿越
-  if (!filePath.startsWith(PUBLIC_DIR)) { sendText(res, 403, 'Forbidden'); return; }
+  /* 防目录穿越。
+   * 不用 `path.join(...).startsWith(PUBLIC_DIR)`：PUBLIC_DIR 没有尾分隔符时，
+   * `/app/public-evil/x.css` 也会被 startsWith('/app/public') 判成「在 public 里」。
+   * path.resolve 会先把 `..` 折叠干净，再和「PUBLIC_DIR + 分隔符」比，
+   * 语义没有歧义：要么正好等于 PUBLIC_DIR 本身，要么必须以 PUBLIC_DIR/ 开头。 */
+  const filePath = path.resolve(PUBLIC_DIR, relative);
+  if (filePath !== PUBLIC_DIR && !filePath.startsWith(PUBLIC_DIR + path.sep)) {
+    sendText(res, 403, 'Forbidden');
+    return;
+  }
 
-  fs.readFile(filePath, (err, data) => {
-    if (err) { sendText(res, 404, 'Not Found: ' + pathname); return; }
-    const type = MIME_TYPES[path.extname(filePath).toLowerCase()] || 'application/octet-stream';
-    // 控制台是随改随生效的工具，禁止缓存，避免改完前端还看到旧页面
-    res.writeHead(200, { 'Content-Type': type, 'Cache-Control': 'no-store, must-revalidate' });
-    res.end(data);
+  /* 静态资源用「ETag + 必须回源校验」而不是一刀切 no-store：
+   * 控制台是随改随生效的工具，不能长期缓存；但每次刷新都重下前端脚本 / CSS 也没必要。
+   * Cache-Control: no-cache 的语义是「可以存，但每次用之前必须回源确认」，
+   * 文件没变就回 304（省掉 body），变了（mtime/size 变 → ETag 变）就回 200 新内容。
+   * ETag 由 size + mtime 得出，与 nginx 的做法一致；代价是 `cp -p`（保留 mtime）
+   * 这种覆盖写入不会换 ETag —— 手工编辑和部署脚本都会刷新 mtime，不受影响。 */
+  fs.stat(filePath, (statErr, st) => {
+    if (statErr || !st.isFile()) { sendText(res, 404, 'Not Found: ' + pathname); return; }
+    const etag = 'W/"' + st.size.toString(16) + '-' + Math.floor(st.mtimeMs).toString(16) + '"';
+    const cacheHeaders = { 'ETag': etag, 'Cache-Control': 'no-cache' };
+
+    const inm = String(req.headers['if-none-match'] || '');
+    const fresh = inm.split(',').some((one) => one.trim() === etag || one.trim() === '*');
+    if (fresh) {
+      res.writeHead(304, cacheHeaders);
+      res.end();
+      return;
+    }
+
+    fs.readFile(filePath, (err, data) => {
+      if (err) { sendText(res, 404, 'Not Found: ' + pathname); return; }
+      const type = MIME_TYPES[path.extname(filePath).toLowerCase()] || 'application/octet-stream';
+      res.writeHead(200, Object.assign({ 'Content-Type': type }, cacheHeaders));
+      res.end(data);
+    });
   });
 }
 
@@ -1524,7 +1693,7 @@ async function requestHandler(req, res) {
       return;
     }
     if (isStaticPath(url.pathname)) {
-      serveStatic(res, url.pathname);
+      serveStatic(req, res, url.pathname);
       return;
     }
     // 浏览器自动发起的探测请求不进日志，免得把「请求日志」刷满
@@ -1550,6 +1719,7 @@ function localAddresses() {
 }
 
 function main() {
+  ensureConfigFile();
   loadConfig();
 
   /* 监听 config.json 变更，自动重载（让 tools/add-user.js 改完即生效，无需重启）。
@@ -1576,19 +1746,48 @@ function main() {
       const name = filename ? String(filename) : '';
       // 只认 config.json 本身；临时文件与备份不触发
       if (name !== 'config.json') return;
+      // 自己刚保存触发的事件直接忽略，避免保存中途又把内存 config 重载成旧快照
+      if (savingNow) return;
       scheduleReload();
     });
   } catch (e) {
     console.error('[config] 无法监听 config.json 变更（自动重载不可用，需手动重启）：' + (e && e.message ? e.message : e));
   }
 
-  // 兜底：任何一个请求处理里漏出的异常都不该让挡板整台挂掉——联调中途服务没了最难受
+  // 未捕获异常：连接层异常（客户端已断开，ECONNRESET/EPIPE 等）属良性，宽容处理；
+  // 其它说明进程状态可能已损坏，记录完整堆栈后退出，避免继续服务出错数据。
   process.on('uncaughtException', (err) => {
-    console.error('[未捕获异常，进程继续运行]', err && err.stack ? err.stack : err);
+    const benign = err && (err.code === 'ECONNRESET' || err.code === 'EPIPE'
+      || err.code === 'ECANCELED' || err.syscall === 'write' || err.syscall === 'read');
+    if (benign) {
+      console.error('[连接层异常，已忽略]', err && err.message);
+      return;
+    }
+    console.error('[未捕获异常，进程退出]', err && err.stack ? err.stack : err);
+    process.exit(1);
   });
   process.on('unhandledRejection', (err) => {
-    console.error('[未处理的 Promise 异常，进程继续运行]', err && err.stack ? err.stack : err);
+    // 单次请求级未处理 rejection 不直接杀进程（避免一个挂掉的请求拖垮整台），
+    // 但记录下来，便于从日志定位根因。
+    console.error('[未处理的 Promise 异常]', err && (err.stack || err.message || err));
   });
+
+  // 优雅关停：停止接收新连接，等在途请求结束后再退出（部署/Docker 停止信号）
+  let shuttingDown = false;
+  function gracefulShutdown(signal) {
+    if (shuttingDown) return;
+    shuttingDown = true;
+    console.log('[' + signal + '] 收到信号，准备优雅关停…');
+    if (server) {
+      server.close(() => { console.log('[shutdown] 在途连接已关闭，退出'); process.exit(0); });
+    } else {
+      process.exit(0);
+    }
+    // 兜底：10s 内没优雅结束就强杀
+    setTimeout(() => { console.log('[shutdown] 超时，强制退出'); process.exit(1); }, 10000).unref();
+  }
+  process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+  process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
   if (process.env.MOCK_SEED === '1') {
     seedHistoricalLogs();   // 演示用日志种子，仅显式开启
@@ -1601,6 +1800,16 @@ function main() {
   RO_PORT = Number(process.env.READONLY_PORT || (config.server && config.server.readonlyPort) || 0);
 
   const server = http.createServer(requestHandler);
+  server.on('error', (e) => {
+    if (e && e.code === 'EADDRINUSE') {
+      console.error('[启动失败] 端口 ' + port + ' 已被占用。');
+      console.error('[启动失败] 可改用其它端口启动，例如：PORT=18081 node server.js；或先停掉占用该端口的进程。');
+      process.exit(1);
+      return;
+    }
+    console.error('[启动失败]', e && e.stack ? e.stack : e);
+    process.exit(1);
+  });
   server.listen(port, host, () => {
     const lan = localAddresses();
     console.log('==========================================================');
@@ -1638,6 +1847,11 @@ function main() {
         console.log('==========================================================');
       });
       roServer.on('error', (e) => {
+        if (e && e.code === 'EADDRINUSE') {
+          console.error('[启动失败] 只读端口 ' + RO_PORT + ' 已被占用。');
+          console.error('[启动失败] 主端口已启动，但只读分享不可用；可将 READONLY_PORT 改成其它端口后重启。');
+          return;
+        }
         console.error('[只读端口启动失败]', e && e.message ? e.message : e);
       });
     }

@@ -2833,7 +2833,7 @@ body.readonly .group[data-group-id="__ungrouped__"] .group__count {
  * 与 .batchbar 同族（都住在 .api-scroll 顶部、都在 216px 的窄栏里），但刻意比它安静：
  * 批量条说的是"你正在做的操作"，这条说的是"列表本身的体检结果"，而且会出现很久 ——
  * 所以用 warn 色描边 + 软底、不吸顶（跟列表一起滚走），不去抢批量条的视觉层级。
- * 只在分组树态、且非批量模式时渲染（见 main.js 的 shadowBannerHtml）。 */
+ * 只在分组树态、且非批量模式时渲染（见 api-list.js 的 shadowBannerHtml）。 */
 .shadow-banner {
   display: flex;
   align-items: center;

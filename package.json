@@ -24,15 +24,23 @@
   },
   "scripts": {
     "start": "node server.js",
+    "verify:all": "npm run verify:docs && npm run verify:globals && npm run verify:core && npm run verify:auth && npm run verify:limits && npm run verify:basics && npm run verify:console",
+    "verify:auth": "node tools/verify-auth-security.js",
+    "verify:basics": "node tools/verify-server-basics.js",
+    "verify:console": "node tools/verify-console-boot.js",
+    "verify:core": "node tools/verify-core-logic.js",
     "verify:deploy": "bash tools/verify-deploy.sh",
-    "verify:docs": "node tools/verify-docs.js"
+    "verify:docs": "node tools/verify-docs.js",
+    "verify:globals": "node tools/verify-globals.js",
+    "verify:limits": "node tools/verify-mock-limits.js"
   },
   "files": [
     "server.js",
+    "lib",
     "public",
     "tools",
     "docs",
-    "config.json",
+    "config.example.json",
     "Dockerfile",
     "docker-compose.yml",
     "mock-server.service",

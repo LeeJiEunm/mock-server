@@ -22,15 +22,25 @@ jobs:
           node-version: ${{ matrix.node-version }}
 
       - name: Syntax check (zero-dependency, Node built-ins only)
+        # 用 find 而不是 `for f in server.js tools/*.js`：拆出 lib/ 与 tools/lib/ 之后，
+        # 写死目录的写法会静默漏检新模块（语法错在 CI 里看不见，只在运行时炸）。
         run: |
           fail=0
-          for f in server.js tools/*.js; do
+          while IFS= read -r f; do
             node --check "$f" || { echo "SYNTAX FAIL: $f"; fail=1; }
-          done
+          done < <(find . -name node_modules -prune -o -name '*.js' -print)
           exit $fail
 
       - name: Docs parity check (zh/en README section markers must match)
         run: node tools/verify-docs.js
+
+      - name: Server-side checks (core, auth, limits, basics)
+        run: |
+          npm run verify:globals
+          npm run verify:core
+          npm run verify:auth
+          npm run verify:limits
+          npm run verify:basics
 
       - name: Smoke test (boot server, hit health endpoint)
         run: |

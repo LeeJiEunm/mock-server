@@ -1,0 +1,253 @@
+{
+  "server": {
+    "host": "0.0.0.0",
+    "port": 18080,
+    "readonlyPort": 0
+  },
+  "logSize": 200,
+  "scriptMode": true,
+  "groups": [
+    {
+      "id": "g-demo",
+      "name": "示例接口",
+      "proxyUrl": ""
+    },
+    {
+      "id": "gmtyvu5aq",
+      "name": "我的第一个分组",
+      "proxyUrl": ""
+    }
+  ],
+  "apis": [
+    {
+      "id": "demo-sample",
+      "name": "示例：条件响应",
+      "module": "demo",
+      "path": "sample",
+      "enabled": true,
+      "desc": "演示用。根据请求体字段 code 返回不同响应（500 / 404 / 默认成功），用于演示条件匹配与脚本响应。",
+      "proxy": {
+        "enable": false,
+        "url": ""
+      },
+      "vars": {
+        "errorMessage": "系统繁忙，请稍后重试",
+        "test": "1"
+      },
+      "rules": [
+        {
+          "id": "r1",
+          "name": "code=500 → 返回 500",
+          "enabled": true,
+          "match": "all",
+          "conditions": [
+            {
+              "source": "body",
+              "path": "code",
+              "op": "eq",
+              "value": "500"
+            }
+          ],
+          "response": {
+            "mode": "static",
+            "status": 500,
+            "delayMs": 0,
+            "delayMaxMs": 0,
+            "fault": "malformed",
+            "contentType": "application/json;charset=UTF-8",
+            "body": "{\"code\":500,\"message\":\"{{vars.errorMessage}}\"}",
+            "script": ""
+          },
+          "updatedBy": "",
+          "updatedAt": 1789250042799
+        },
+        {
+          "id": "r2",
+          "name": "code=404 → 返回 404",
+          "enabled": true,
+          "match": "all",
+          "conditions": [
+            {
+              "source": "body",
+              "path": "code",
+              "op": "eq",
+              "value": "404"
+            }
+          ],
+          "response": {
+            "mode": "static",
+            "status": 404,
+            "delayMs": 0,
+            "delayMaxMs": 0,
+            "fault": "none",
+            "contentType": "application/json;charset=UTF-8",
+            "body": "{\"code\":404,\"message\":\"资源不存在\"}",
+            "script": ""
+          }
+        },
+        {
+          "id": "r3",
+          "name": "URL 带 slow=1 → 延迟 3 秒",
+          "enabled": true,
+          "match": "all",
+          "conditions": [
+            {
+              "source": "query",
+              "path": "slow",
+              "op": "eq",
+              "value": "1"
+            }
+          ],
+          "response": {
+            "mode": "static",
+            "status": 200,
+            "delayMs": 3000,
+            "delayMaxMs": 3000,
+            "fault": "none",
+            "contentType": "application/json;charset=UTF-8",
+            "body": "{\"code\":0,\"message\":\"mock: 模拟慢响应\"}",
+            "script": ""
+          }
+        },
+        {
+          "id": "r4",
+          "name": "默认：成功响应并回显 code",
+          "enabled": true,
+          "match": "all",
+          "conditions": [],
+          "response": {
+            "mode": "script",
+            "status": 200,
+            "delayMs": 0,
+            "delayMaxMs": 0,
+            "fault": "none",
+            "contentType": "application/json;charset=UTF-8",
+            "body": "",
+            "script": "// ctx.body：请求体；ctx.vars：本接口配置变量\nconst code = ctx.body.code || 'default';\nreturn {\n  code: 0,\n  message: 'ok',\n  data: {\n    requestCode: code,\n    echo: ctx.body\n  }\n};"
+          }
+        }
+      ],
+      "defaultResponse": {
+        "mode": "static",
+        "status": 200,
+        "delayMs": 0,
+        "delayMaxMs": 0,
+        "fault": "none",
+        "contentType": "application/json;charset=UTF-8",
+        "body": "{\"code\":0,\"message\":\"mock: 未命中任何规则\"}",
+        "script": ""
+      },
+      "method": "POST",
+      "groupId": "",
+      "updatedBy": "",
+      "updatedAt": 1789256816083
+    },
+    {
+      "id": "demo-echo",
+      "name": "示例：回显请求",
+      "module": "demo",
+      "path": "echo",
+      "enabled": true,
+      "desc": "演示用。任何请求都回显入参，可按 header 里的 X-Mock-Case 定制返回。",
+      "proxy": {
+        "enable": false,
+        "url": ""
+      },
+      "vars": {},
+      "rules": [
+        {
+          "id": "r1",
+          "name": "X-Mock-Case=error → 400",
+          "enabled": true,
+          "match": "all",
+          "conditions": [
+            {
+              "source": "header",
+              "path": "x-mock-case",
+              "op": "eq",
+              "value": "error"
+            }
+          ],
+          "response": {
+            "mode": "static",
+            "status": 400,
+            "delayMs": 0,
+            "delayMaxMs": 0,
+            "fault": "none",
+            "contentType": "application/json;charset=UTF-8",
+            "body": "{\"code\":400,\"msg\":\"mock：已按用例返回失败\"}",
+            "script": ""
+          }
+        },
+        {
+          "id": "r2",
+          "name": "其他：回显",
+          "enabled": true,
+          "match": "all",
+          "conditions": [],
+          "response": {
+            "mode": "static",
+            "status": 200,
+            "delayMs": 0,
+            "delayMaxMs": 0,
+            "fault": "none",
+            "contentType": "application/json;charset=UTF-8",
+            "body": "{\"code\":0,\"msg\":\"mock echo\",\"id\":\"{{body.id}}\",\"url\":\"{{header.host}}\"}",
+            "script": ""
+          }
+        }
+      ],
+      "defaultResponse": {
+        "mode": "static",
+        "status": 200,
+        "delayMs": 0,
+        "delayMaxMs": 0,
+        "fault": "none",
+        "contentType": "application/json;charset=UTF-8",
+        "body": "{\"code\":0,\"msg\":\"mock echo\"}",
+        "script": ""
+      },
+      "groupId": "g-demo",
+      "method": "POST",
+      "updatedBy": "",
+      "updatedAt": 1789360433311
+    },
+    {
+      "id": "api-mtyvu8wa",
+      "name": "我的第一个接口",
+      "module": "demo",
+      "path": "first/second/third",
+      "method": "POST",
+      "enabled": false,
+      "desc": "",
+      "proxy": {
+        "enable": false,
+        "url": ""
+      },
+      "rules": [],
+      "vars": {},
+      "defaultResponse": {
+        "mode": "static",
+        "status": 200,
+        "delayMs": 0,
+        "delayMaxMs": 0,
+        "fault": "none",
+        "contentType": "application/json;charset=UTF-8",
+        "body": "{}",
+        "script": ""
+      },
+      "groupId": "gmtyvu5aq",
+      "updatedBy": "",
+      "updatedAt": 1789375110462
+    }
+  ],
+  "meta": {
+    "contactEmail": "maintainer@example.com",
+    "contactLabel": "维护者",
+    "repoUrl": "https://github.com/LeeJiEunm/mock-server",
+    "repoLabel": "mock-server"
+  },
+  "users": [],
+  "changelog": [],
+  "shareTokens": []
+}

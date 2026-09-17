@@ -108,14 +108,17 @@ const rect = (el) => { if (!el) return null; const b = el.getBoundingClientRect(
 const out = {};
 
 /* ---------- 0) 自证：页面跑的是哪一版前端 ---------- */
+/* 旧单文件前端已按功能拆成 public/scripts/ 下多个文件：
+ *   function labelOf 在 state.js，data-i18n-value 相关逻辑在 drawer.js。 */
 const i18nSrc = await (await fetch('/scripts/i18n.js')).text();
-const mainSrc = await (await fetch('/scripts/main.js')).text();
+const stateSrc = await (await fetch('/scripts/state.js')).text();
+const drawerSrc = await (await fetch('/scripts/drawer.js')).text();
 const cssSrc = await (await fetch('/styles/components.css')).text();
 out.build = {
   i18n_zh_example: i18nSrc.indexOf('例① curl') >= 0,          // 中文示例（本轮新增）
   i18n_en_example: i18nSrc.indexOf('e.g. 1 curl') >= 0,        // 英文示例（本轮新增）
-  main_hasLabelOf: mainSrc.indexOf('function labelOf') >= 0,   // 切语言的 key 化修复
-  main_hasI18nValue: mainSrc.indexOf('data-i18n-value') >= 0,
+  main_hasLabelOf: stateSrc.indexOf('function labelOf') >= 0,  // 切语言的 key 化修复
+  main_hasI18nValue: drawerSrc.indexOf('data-i18n-value') >= 0,
   css_toastTop: /\\.toast-host\\s*\\{[^}]*top:/.test(cssSrc),      // 改这轮前后能一眼看出
 };
 

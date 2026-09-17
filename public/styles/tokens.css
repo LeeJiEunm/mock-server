@@ -5,7 +5,7 @@
  * 说明：内网测试机无外网，字体走本地字体栈，不依赖 CDN，避免降级闪变。
  *
  * 主题机制：
- *   <html data-theme="light|night|deepnight">  由 main.js 写入
+ *   <html data-theme="light|night|deepnight">  由 theme.js 写入
  *   浏览器 color-scheme：night / deepnight 都按 dark，只有 day 按 light。
  *   所有颜色一律走变量；组件层不得出现硬编码色值，否则换主题会花掉。
  * ========================================================================== */
@@ -378,4 +378,3 @@
   --shadow-2: 0 8px 28px rgba(0, 0, 0, 0.42);
   --shadow-3: 0 24px 64px rgba(0, 0, 0, 0.56);
 }
-

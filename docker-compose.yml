@@ -21,6 +21,8 @@ services:
       - MOCK_ADMIN_USER=${MOCK_ADMIN_USER:-admin}
       - MOCK_ADMIN_PASS=${MOCK_ADMIN_PASS:-}
     volumes:
-      # 配置挂到宿主机：界面里改的规则才能落到宿主机文件、容器重建也不丢
-      # 注意：宿主机必须先有这个文件，否则 docker 会把目录挂进来
+      # 配置挂到宿主机：界面里改的规则才能落到宿主机文件、容器重建也不丢。
+      # ⚠️ 宿主机必须先有这个文件：docker 对「不存在的路径」会按目录挂载，
+      #    那样容器里的 config.json 会变成目录，服务启动时会明确报错并给出处理办法。
+      #    首次使用先执行一次：  cp config.example.json config.json
       - ./config.json:/app/config.json
