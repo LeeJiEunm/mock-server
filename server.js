@@ -1772,19 +1772,38 @@ function main() {
     console.error('[未处理的 Promise 异常]', err && (err.stack || err.message || err));
   });
 
-  // 优雅关停：停止接收新连接，等在途请求结束后再退出（部署/Docker 停止信号）
+  // 优雅关停：先结束日志 SSE 长连接，再关服务器；否则 server.close() 会一直等这些连接结束
   let shuttingDown = false;
+  let roServer = null;
   function gracefulShutdown(signal) {
     if (shuttingDown) return;
     shuttingDown = true;
     console.log('[' + signal + '] 收到信号，准备优雅关停…');
-    if (server) {
-      server.close(() => { console.log('[shutdown] 在途连接已关闭，退出'); process.exit(0); });
-    } else {
-      process.exit(0);
-    }
-    // 兜底：10s 内没优雅结束就强杀
-    setTimeout(() => { console.log('[shutdown] 超时，强制退出'); process.exit(1); }, 10000).unref();
+
+    /* SSE 日志流是长连接：不主动 end 的话 server.close() 会一直等，直到超时强杀 */
+    logStreams.forEach((res) => {
+      try { res.end('event: shutdown\ndata: {}\n\n'); } catch (e) {}
+    });
+    logStreams.clear();
+
+    const servers = [server, roServer].filter(Boolean);
+    if (!servers.length) process.exit(0);
+
+    servers.forEach((srv) => {
+      if (typeof srv.closeAllConnections === 'function') srv.closeAllConnections();
+      if (typeof srv.closeIdleConnections === 'function') srv.closeIdleConnections();
+    });
+
+    let remaining = servers.length;
+    const done = () => {
+      remaining -= 1;
+      if (remaining === 0) {
+        console.log('[shutdown] 连接已关闭，退出');
+        process.exit(0);
+      }
+    };
+    servers.forEach((srv) => srv.close(done));
+    setTimeout(() => { console.log('[shutdown] 超时，强制退出'); process.exit(1); }, 3000).unref();
   }
   process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
   process.on('SIGINT', () => gracefulShutdown('SIGINT'));
@@ -1838,7 +1857,7 @@ function main() {
 
     // 只读隔离端口：分享链接专用，剥离 ?share= 也只能是只读，无法暴露/变成可编辑主端口
     if (RO_PORT && RO_PORT !== port) {
-      const roServer = http.createServer((req, res) => {
+      roServer = http.createServer((req, res) => {
         req.__ro = true;
         requestHandler(req, res);
       });
